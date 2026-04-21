@@ -17,6 +17,8 @@ API_PORT = int(os.getenv("PORT", os.getenv("API_PORT", "8000")))
 API_URL = os.getenv("API_URL", f"http://{API_HOST}:{API_PORT}")
 ADMIN_PASSWORD = os.getenv("ADMIN_PASSWORD", "SJCMINAM")
 START_INTERNAL_API = os.getenv("START_INTERNAL_API", "true").lower() == "true"
+BOT_LOGIN_RETRY_COUNT = int(os.getenv("BOT_LOGIN_RETRY_COUNT", "5"))
+BOT_LOGIN_RETRY_DELAY = int(os.getenv("BOT_LOGIN_RETRY_DELAY", "30"))
 
 owner_user_id_raw = os.getenv("OWNER_USER_ID")
 if owner_user_id_raw is None:
@@ -58,6 +60,28 @@ def wait_for_api_server():
         time.sleep(0.2)
 
     raise RuntimeError(f"API server did not start: {API_URL}")
+
+
+def run_bot_with_retries():
+    last_error: Exception | None = None
+
+    for attempt in range(1, BOT_LOGIN_RETRY_COUNT + 1):
+        try:
+            bot.run(TOKEN)
+            return
+        except (discord.HTTPException, discord.LoginFailure) as exc:
+            last_error = exc
+            if attempt == BOT_LOGIN_RETRY_COUNT:
+                break
+
+            print(
+                f"Discord login failed ({attempt}/{BOT_LOGIN_RETRY_COUNT}). "
+                f"Retrying in {BOT_LOGIN_RETRY_DELAY}s: {exc}"
+            )
+            time.sleep(BOT_LOGIN_RETRY_DELAY)
+
+    if last_error is not None:
+        raise last_error
 
 
 def api_get_problems():
@@ -678,4 +702,4 @@ if __name__ == "__main__":
         api_thread.start()
         wait_for_api_server()
 
-    bot.run(TOKEN)
+    run_bot_with_retries()
