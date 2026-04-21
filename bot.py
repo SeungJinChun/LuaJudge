@@ -19,6 +19,7 @@ ADMIN_PASSWORD = os.getenv("ADMIN_PASSWORD", "SJCMINAM")
 START_INTERNAL_API = os.getenv("START_INTERNAL_API", "true").lower() == "true"
 BOT_LOGIN_RETRY_COUNT = int(os.getenv("BOT_LOGIN_RETRY_COUNT", "5"))
 BOT_LOGIN_RETRY_DELAY = int(os.getenv("BOT_LOGIN_RETRY_DELAY", "30"))
+API_STARTUP_TIMEOUT = int(os.getenv("API_STARTUP_TIMEOUT", "60"))
 
 owner_user_id_raw = os.getenv("OWNER_USER_ID")
 if owner_user_id_raw is None:
@@ -34,23 +35,32 @@ COLOR_DANGER = discord.Color.from_rgb(192, 57, 43)
 COLOR_NEUTRAL = discord.Color.from_rgb(88, 101, 242)
 
 admin_sessions: set[int] = set()
+api_startup_error: Exception | None = None
 
 
 def start_internal_api_server():
-    from app import app as fastapi_app
+    global api_startup_error
 
-    config = uvicorn.Config(
-        fastapi_app,
-        host="0.0.0.0",
-        port=API_PORT,
-        log_level="info",
-    )
-    server = uvicorn.Server(config)
-    server.run()
+    try:
+        from app import app as fastapi_app
+
+        config = uvicorn.Config(
+            fastapi_app,
+            host="0.0.0.0",
+            port=API_PORT,
+            log_level="info",
+        )
+        server = uvicorn.Server(config)
+        server.run()
+    except Exception as exc:
+        api_startup_error = exc
+        print(f"Internal API server failed to start: {exc}")
 
 
 def wait_for_api_server():
-    for _ in range(50):
+    for _ in range(API_STARTUP_TIMEOUT * 5):
+        if api_startup_error is not None:
+            raise RuntimeError(f"Internal API server crashed: {api_startup_error}") from api_startup_error
         try:
             res = requests.get(f"{API_URL}/", timeout=2)
             if res.ok:
@@ -59,7 +69,7 @@ def wait_for_api_server():
             pass
         time.sleep(0.2)
 
-    raise RuntimeError(f"API server did not start: {API_URL}")
+    raise RuntimeError(f"API server did not start within {API_STARTUP_TIMEOUT}s: {API_URL}")
 
 
 def run_bot_with_retries():
