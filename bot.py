@@ -913,26 +913,6 @@ async def delete_user_data_command(interaction: discord.Interaction, 대상: dis
         await interaction.followup.send(f"오류 발생: {e}", ephemeral=True)
 
 
-@bot.tree.command(name="랭킹역할동기화", description="관리자 전용 랭킹 1등 역할 동기화 명령어입니다.")
-async def sync_rank_role_command(interaction: discord.Interaction):
-    if not require_admin(interaction.user.id):
-        await interaction.response.send_message(
-            "관리자 전용 명령어입니다.",
-            ephemeral=True,
-        )
-        return
-
-    if interaction.guild is None:
-        await interaction.response.send_message("서버에서만 사용할 수 있습니다.", ephemeral=True)
-        return
-
-    try:
-        await interaction.response.defer(ephemeral=True)
-        await sync_top_rank_role(interaction.guild)
-        await interaction.followup.send("랭킹 역할 동기화를 완료했습니다.", ephemeral=True)
-    except Exception as e:
-        await interaction.followup.send(f"오류 발생: {e}", ephemeral=True)
-
 if __name__ == "__main__":
     if START_INTERNAL_API:
         api_thread = threading.Thread(target=start_internal_api_server, daemon=True)
