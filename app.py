@@ -213,7 +213,7 @@ def get_next_problem_id(db) -> int:
     return next_id
 
 
-@app.get("/")
+@app.api_route("/", methods=["GET", "HEAD"])
 def root():
     return {"message": "server is running"}
 
@@ -651,6 +651,6 @@ def get_rankings():
     finally:
         db.close()
 
-@app.get("/health")
+@app.api_route("/health", methods=["GET", "HEAD"])
 def health():
     return {"ok": True}
