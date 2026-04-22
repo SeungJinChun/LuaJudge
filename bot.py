@@ -20,6 +20,8 @@ START_INTERNAL_API = os.getenv("START_INTERNAL_API", "true").lower() == "true"
 BOT_LOGIN_RETRY_COUNT = int(os.getenv("BOT_LOGIN_RETRY_COUNT", "5"))
 BOT_LOGIN_RETRY_DELAY = int(os.getenv("BOT_LOGIN_RETRY_DELAY", "30"))
 API_STARTUP_TIMEOUT = int(os.getenv("API_STARTUP_TIMEOUT", "60"))
+TOP_RANK_ROLE_ID = os.getenv("TOP_RANK_ROLE_ID")
+TOP_RANK_ROLE_NAME = os.getenv("TOP_RANK_ROLE_NAME", "랭킹 1등")
 
 owner_user_id_raw = os.getenv("OWNER_USER_ID")
 if owner_user_id_raw is None:
@@ -118,6 +120,75 @@ def api_get_rankings():
     return res.json()
 
 
+def get_top_rank_role(guild: discord.Guild) -> discord.Role | None:
+    if TOP_RANK_ROLE_ID:
+        role = guild.get_role(int(TOP_RANK_ROLE_ID))
+        if role is not None:
+            return role
+
+    return discord.utils.get(guild.roles, name=TOP_RANK_ROLE_NAME)
+
+
+async def ensure_top_rank_role(guild: discord.Guild) -> discord.Role | None:
+    role = get_top_rank_role(guild)
+    if role is not None:
+        return role
+
+    me = guild.me
+    if me is None or not me.guild_permissions.manage_roles:
+        return None
+
+    return await guild.create_role(
+        name=TOP_RANK_ROLE_NAME,
+        reason="랭킹 1등 역할 자동 생성",
+    )
+
+
+async def get_guild_rankings(guild: discord.Guild) -> list[tuple[discord.Member, int, int]]:
+    rankings = api_get_rankings()
+    guild_rankings: list[tuple[discord.Member, int, int]] = []
+
+    for item in rankings:
+        try:
+            member = await guild.fetch_member(item["user_id"])
+        except (discord.NotFound, discord.Forbidden, discord.HTTPException):
+            continue
+
+        guild_rankings.append((member, item["score"], item["user_id"]))
+
+    return guild_rankings
+
+
+async def sync_top_rank_role(guild: discord.Guild):
+    role = await ensure_top_rank_role(guild)
+    if role is None:
+        return
+
+    me = guild.me
+    if me is None or not me.guild_permissions.manage_roles or role >= me.top_role:
+        return
+
+    guild_rankings = await get_guild_rankings(guild)
+    if not guild_rankings:
+        top_members: set[int] = set()
+    else:
+        top_score = guild_rankings[0][1]
+        top_members = {user_id for _, score, user_id in guild_rankings if score == top_score}
+
+    current_members = {member.id for member in role.members}
+
+    for member_id in current_members - top_members:
+        member = guild.get_member(member_id)
+        if member is None:
+            continue
+        await member.remove_roles(role, reason="랭킹 1등 변경")
+
+    for member, _, user_id in guild_rankings:
+        if user_id not in top_members or role in member.roles:
+            continue
+        await member.add_roles(role, reason="랭킹 1등 부여")
+
+
 def api_submit(problem_id: int, source_code: str, user_id: int):
     res = requests.post(
         f"{API_URL}/submit",
@@ -162,28 +233,62 @@ def build_embed(title: str, description: str, color: discord.Color) -> discord.E
     return embed
 
 
-def build_problem_list_embed(problems: list[dict]) -> discord.Embed:
-    embed = build_embed(
-        "문제 목록",
-        "드롭다운에서 문제를 고르면 상세 설명과 제출 버튼이 열립니다.\n"
-        f"현재 등록된 문제: **{len(problems)}개**",
-        COLOR_PRIMARY,
+def format_problem_meta(problem: dict) -> str:
+    return f"{problem['score']}점 · {problem['difficulty']}"
+
+
+DIFFICULTY_ORDER = ["쉬움", "보통", "어려움", "미침", "불가능"]
+
+
+def sort_problems_by_difficulty(problems: list[dict]) -> list[dict]:
+    order = {name: index for index, name in enumerate(DIFFICULTY_ORDER)}
+    return sorted(
+        problems,
+        key=lambda problem: (
+            order.get(problem.get("difficulty", ""), len(DIFFICULTY_ORDER)),
+            problem["score"],
+            problem["id"],
+        ),
     )
 
-    for problem in problems[:10]:
+
+def filter_problems_by_difficulty(problems: list[dict], difficulty: str | None) -> list[dict]:
+    if difficulty is None:
+        return sort_problems_by_difficulty(problems)
+    return [problem for problem in sort_problems_by_difficulty(problems) if problem["difficulty"] == difficulty]
+
+
+def build_problem_list_embed(problems: list[dict], difficulty: str | None = None) -> discord.Embed:
+    filtered_problems = filter_problems_by_difficulty(problems, difficulty)
+    title = "문제 목록" if difficulty is None else f"{difficulty} 문제 목록"
+    description = (
+        "드롭다운에서 문제를 고르면 상세 설명과 제출 버튼이 열립니다.\n"
+        f"현재 표시 중인 문제: **{len(filtered_problems)}개**"
+    )
+    embed = build_embed(title, description, COLOR_PRIMARY)
+
+    for difficulty_name in DIFFICULTY_ORDER:
+        group = [problem for problem in filtered_problems if problem["difficulty"] == difficulty_name]
+        if not group:
+            continue
+
+        lines = [
+            f"`#{problem['id']}` {problem['title']} ({problem['score']}점)"
+            for problem in group[:8]
+        ]
+        if len(group) > 8:
+            lines.append(f"... 외 {len(group) - 8}개")
+
         embed.add_field(
-            name=f"#{problem['id']}  {problem['title']} · {problem['score']}점",
-            value=shorten(problem["description"], 90),
+            name=f"{difficulty_name} · {len(group)}개",
+            value="\n".join(lines),
             inline=False,
         )
 
-    if len(problems) > 10:
+    if len(filtered_problems) > 25:
         embed.add_field(
             name="안내",
-            value=(
-                "드롭다운에는 최대 25개 문제까지 표시됩니다. "
-                f"현재 목록에는 추가로 {len(problems) - 10}개 문제가 더 있습니다."
-            ),
+            value="드롭다운에는 최대 25개 문제까지만 표시됩니다.",
             inline=False,
         )
 
@@ -198,6 +303,7 @@ def build_problem_detail_embed(problem: dict) -> discord.Embed:
     )
     embed.add_field(name="테스트케이스", value=f"`{problem['test_cases_count']}개`", inline=True)
     embed.add_field(name="점수", value=f"`{problem['score']}점`", inline=True)
+    embed.add_field(name="난이도", value=f"`{problem['difficulty']}`", inline=True)
     embed.add_field(name="언어", value="`Lua`", inline=True)
     embed.add_field(
         name="제출 방식",
@@ -264,6 +370,7 @@ def build_problem_saved_embed(problem: dict, action: str) -> discord.Embed:
         f"문제 번호: **#{problem['id']}**\n"
         f"제목: **{problem['title']}**\n"
         f"점수: **{problem['score']}점**\n"
+        f"난이도: **{problem['difficulty']}**\n"
         f"테스트케이스: **{problem['test_cases_count']}개**",
         COLOR_SUCCESS,
     )
@@ -333,6 +440,11 @@ bot = commands.Bot(command_prefix="!", intents=intents)
 @bot.event
 async def on_ready():
     synced = await bot.tree.sync()
+    for guild in bot.guilds:
+        try:
+            await sync_top_rank_role(guild)
+        except Exception as exc:
+            print(f"Top rank role sync failed in guild {guild.id}: {exc}")
     print(f"{bot.user} 로그인 완료")
     print("슬래시 명령어 동기화 완료")
     print("동기화된 명령어:", [command.name for command in synced])
@@ -373,6 +485,11 @@ class SubmitModal(discord.ui.Modal, title="Lua 코드 제출"):
             )
 
             if result["status"] == "ACCEPTED":
+                if interaction.guild is not None:
+                    try:
+                        await sync_top_rank_role(interaction.guild)
+                    except Exception as exc:
+                        print(f"Top rank role sync failed in guild {interaction.guild.id}: {exc}")
                 try:
                     refreshed_problems = api_get_problems()
                     await self.parent_interaction.edit_original_response(
@@ -492,7 +609,7 @@ class ProblemSelect(discord.ui.Select):
                 discord.SelectOption(
                     label=f"{problem['id']}. {problem['title']}",
                     value=str(problem["id"]),
-                    description=f"{problem['score']}점 · {shorten(problem['description'], 70)}",
+                    description=f"{format_problem_meta(problem)} · {shorten(problem['description'], 70)}",
                 )
             )
 
@@ -529,9 +646,34 @@ class ProblemListView(discord.ui.View):
 
 
 @bot.tree.command(name="문제", description="문제 목록을 보여줍니다.")
-async def problems_command(interaction: discord.Interaction):
+@discord.app_commands.describe(난이도="특정 난이도만 보고 싶으면 선택하세요.")
+@discord.app_commands.choices(
+    난이도=[
+        discord.app_commands.Choice(name="쉬움", value="쉬움"),
+        discord.app_commands.Choice(name="보통", value="보통"),
+        discord.app_commands.Choice(name="어려움", value="어려움"),
+        discord.app_commands.Choice(name="미침", value="미침"),
+        discord.app_commands.Choice(name="불가능", value="불가능"),
+    ]
+)
+async def problems_command(
+    interaction: discord.Interaction,
+    난이도: discord.app_commands.Choice[str] | None = None,
+):
     try:
         problems = api_get_problems()
+        selected_difficulty = None if 난이도 is None else 난이도.value
+        filtered_problems = filter_problems_by_difficulty(problems, selected_difficulty)
+
+        if not filtered_problems:
+            label = "해당 난이도의 문제가 없습니다." if selected_difficulty else "아직 등록된 문제가 없습니다."
+            title = "문제 목록" if selected_difficulty is None else f"{selected_difficulty} 문제 목록"
+            await interaction.response.send_message(
+                embed=build_embed(title, label, COLOR_DANGER),
+                ephemeral=True,
+            )
+            return
+
         if not problems:
             await interaction.response.send_message(
                 embed=build_embed("문제 목록", "아직 등록된 문제가 없습니다.", COLOR_DANGER),
@@ -540,8 +682,8 @@ async def problems_command(interaction: discord.Interaction):
             return
 
         await interaction.response.send_message(
-            embed=build_problem_list_embed(problems),
-            view=ProblemListView(problems),
+            embed=build_problem_list_embed(problems, selected_difficulty),
+            view=ProblemListView(filtered_problems),
             ephemeral=True,
         )
     except requests.HTTPError as e:
@@ -585,30 +727,20 @@ async def ranking_command(interaction: discord.Interaction):
 
     try:
         await interaction.response.defer()
-        rankings = api_get_rankings()
-        guild_rankings: list[tuple[str, int, int]] = []
-
-        for item in rankings:
-            try:
-                member = await interaction.guild.fetch_member(item["user_id"])
-            except discord.NotFound:
-                continue
-            except discord.Forbidden:
-                continue
-            except discord.HTTPException:
-                continue
-
-            guild_rankings.append((member.display_name, item["score"], item["user_id"]))
+        guild_rankings = await get_guild_rankings(interaction.guild)
 
         ranking_lines = [
             f"**{index}.** {name} - **{score}점**"
-            for index, (name, score, _) in enumerate(guild_rankings[:10], start=1)
+            for index, (member, score, _) in enumerate(guild_rankings[:10], start=1)
+            for name in [member.display_name]
         ]
 
-        my_rank_text = None
+        top_role = get_top_rank_role(interaction.guild)
+        my_rank_text = f"1등 역할: **{top_role.name}**" if top_role is not None else None
         for index, (_, score, user_id) in enumerate(guild_rankings, start=1):
             if user_id == interaction.user.id:
-                my_rank_text = f"내 순위: **{index}위** · **{score}점**"
+                rank_line = f"내 순위: **{index}위** · **{score}점**"
+                my_rank_text = rank_line if my_rank_text is None else f"{my_rank_text}\n{rank_line}"
                 break
 
         await interaction.followup.send(

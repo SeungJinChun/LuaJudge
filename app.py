@@ -65,6 +65,8 @@ ensure_schema()
 
 JsonValue = Any
 
+DIFFICULTY_LABELS = ["쉬움", "보통", "어려움", "미침", "불가능"]
+
 
 class TestCaseCreate(BaseModel):
     input_values: list[JsonValue]
@@ -167,12 +169,18 @@ def parse_test_case_row(test_case: TestCase) -> tuple[list[JsonValue], JsonValue
     return input_values, expected_output
 
 
+def score_to_difficulty(score: int) -> str:
+    difficulty_index = min(score // 10, len(DIFFICULTY_LABELS) - 1)
+    return DIFFICULTY_LABELS[difficulty_index]
+
+
 def serialize_problem(problem: Problem, include_test_cases: bool = True) -> dict:
     data = {
         "id": problem.id,
         "title": problem.title,
         "description": problem.description,
         "score": problem.score,
+        "difficulty": score_to_difficulty(problem.score),
         "test_cases_count": len(problem.test_cases),
     }
     if include_test_cases:
