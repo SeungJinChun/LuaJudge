@@ -346,6 +346,27 @@ def build_public_submit_embed(user_name: str, problem_title: str, result: dict) 
             lines.append("(이미 푼 문제입니다)")
         elif result["problem_score"] == 0:
             lines.append("이 문제는 **0점 문제**입니다.")
+    else:
+        failed_results = [case for case in result.get("results", []) if not case.get("passed")]
+        mismatch_case = next(
+            (case for case in failed_results if case.get("error") == "Output mismatch"),
+            None,
+        )
+        runtime_case = next(
+            (case for case in failed_results if case.get("error") and case.get("error") != "Output mismatch"),
+            None,
+        )
+
+        if mismatch_case is not None:
+            lines.append("")
+            lines.append("첫 오답 케이스:")
+            lines.append(f"입력: `{json.dumps(mismatch_case['input_values'], ensure_ascii=False)}`")
+            lines.append(f"기대값: `{json.dumps(mismatch_case['expected_output'], ensure_ascii=False)}`")
+            lines.append(f"실제값: `{json.dumps(mismatch_case.get('actual'), ensure_ascii=False)}`")
+        if runtime_case is not None:
+            error_text = str(runtime_case.get("error", "실행 오류"))
+            lines.append("")
+            lines.append(f"실행 오류: `{error_text}`")
 
     return build_embed(
         f"{user_name} 제출 결과",
@@ -516,11 +537,7 @@ class SubmitModal(discord.ui.Modal, title="Lua 코드 제출"):
                     except Exception as exc:
                         print(f"Top rank role sync failed in guild {interaction.guild.id}: {exc}")
                 try:
-                    refreshed_problems = api_get_problems()
-                    await self.parent_interaction.edit_original_response(
-                        embed=build_problem_list_embed(refreshed_problems),
-                        view=ProblemListView(refreshed_problems),
-                    )
+                    await self.parent_interaction.delete_original_response()
                 except Exception:
                     pass
         except requests.HTTPError as e:
