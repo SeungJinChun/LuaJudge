@@ -567,7 +567,7 @@ class ProblemFormModal(discord.ui.Modal):
             return
 
         try:
-            await interaction.response.defer(ephemeral=True)
+            await interaction.response.defer(ephemeral=False)
             problem_data = {
                 "title": str(self.title_input).strip(),
                 "description": str(self.description_input).strip(),
@@ -584,7 +584,7 @@ class ProblemFormModal(discord.ui.Modal):
 
             await interaction.followup.send(
                 embed=build_problem_saved_embed(saved_problem, action),
-                ephemeral=True,
+                ephemeral=False,
             )
         except ValueError as e:
             await interaction.followup.send(f"입력 형식 오류: {e}", ephemeral=True)
@@ -671,6 +671,7 @@ class ProblemListView(discord.ui.View):
 @discord.app_commands.describe(난이도="특정 난이도만 보고 싶으면 선택하세요.")
 @discord.app_commands.choices(
     난이도=[
+        discord.app_commands.Choice(name="전체문제", value="전체문제"),
         discord.app_commands.Choice(name="쉬움", value="쉬움"),
         discord.app_commands.Choice(name="보통", value="보통"),
         discord.app_commands.Choice(name="어려움", value="어려움"),
@@ -684,7 +685,7 @@ async def problems_command(
 ):
     try:
         problems = api_get_problems()
-        selected_difficulty = None if 난이도 is None else 난이도.value
+        selected_difficulty = None if 난이도 is None or 난이도.value == "전체문제" else 난이도.value
         filtered_problems = filter_problems_by_difficulty(problems, selected_difficulty)
 
         if not filtered_problems:
