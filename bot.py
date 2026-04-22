@@ -181,7 +181,10 @@ async def sync_top_rank_role(guild: discord.Guild):
     for member_id in current_members - top_members:
         member = guild.get_member(member_id)
         if member is None:
-            continue
+            try:
+                member = await guild.fetch_member(member_id)
+            except (discord.NotFound, discord.Forbidden, discord.HTTPException):
+                continue
         await member.remove_roles(role, reason="랭킹 1등 변경")
 
     for member, _, user_id in guild_rankings:
@@ -856,10 +859,14 @@ async def delete_user_data_command(interaction: discord.Interaction, 대상: dis
         return
 
     try:
+        await interaction.response.defer(ephemeral=True)
         api_delete_user_data(대상.id)
         if interaction.guild is not None:
+            top_role = get_top_rank_role(interaction.guild)
+            if top_role is not None and top_role in 대상.roles:
+                await 대상.remove_roles(top_role, reason="사용자 데이터 삭제")
             await sync_top_rank_role(interaction.guild)
-        await interaction.response.send_message(
+        await interaction.followup.send(
             embed=build_user_data_deleted_embed(대상),
             ephemeral=True,
         )
@@ -869,9 +876,9 @@ async def delete_user_data_command(interaction: discord.Interaction, 대상: dis
         except Exception:
             detail = e.response.text
 
-        await interaction.response.send_message(f"사용자 데이터 삭제 실패: {detail}", ephemeral=True)
+        await interaction.followup.send(f"사용자 데이터 삭제 실패: {detail}", ephemeral=True)
     except Exception as e:
-        await interaction.response.send_message(f"오류 발생: {e}", ephemeral=True)
+        await interaction.followup.send(f"오류 발생: {e}", ephemeral=True)
 
 if __name__ == "__main__":
     if START_INTERNAL_API:
