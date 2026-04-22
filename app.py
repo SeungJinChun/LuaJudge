@@ -637,6 +637,27 @@ def get_user_score(user_id: int):
         db.close()
 
 
+@app.delete("/users/{user_id}")
+def delete_user_data(user_id: int):
+    db = SessionLocal()
+
+    try:
+        user_score = db.get(UserScore, user_id)
+        if user_score is None:
+            raise HTTPException(status_code=404, detail="User data not found")
+
+        db.delete(user_score)
+        db.commit()
+        return {"message": "User data deleted", "user_id": user_id}
+    except HTTPException:
+        raise
+    except Exception as e:
+        db.rollback()
+        raise HTTPException(status_code=500, detail=str(e))
+    finally:
+        db.close()
+
+
 @app.get("/rankings")
 def get_rankings():
     db = SessionLocal()

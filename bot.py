@@ -15,7 +15,6 @@ TOKEN = os.getenv("DISCORD_TOKEN")
 API_HOST = os.getenv("API_HOST", "127.0.0.1")
 API_PORT = int(os.getenv("PORT", os.getenv("API_PORT", "8000")))
 API_URL = os.getenv("API_URL", f"http://{API_HOST}:{API_PORT}")
-ADMIN_PASSWORD = os.getenv("ADMIN_PASSWORD", "SJCMINAM")
 START_INTERNAL_API = os.getenv("START_INTERNAL_API", "true").lower() == "true"
 BOT_LOGIN_RETRY_COUNT = int(os.getenv("BOT_LOGIN_RETRY_COUNT", "5"))
 BOT_LOGIN_RETRY_DELAY = int(os.getenv("BOT_LOGIN_RETRY_DELAY", "30"))
@@ -23,10 +22,13 @@ API_STARTUP_TIMEOUT = int(os.getenv("API_STARTUP_TIMEOUT", "60"))
 TOP_RANK_ROLE_ID = os.getenv("TOP_RANK_ROLE_ID")
 TOP_RANK_ROLE_NAME = os.getenv("TOP_RANK_ROLE_NAME", "랭킹 1등")
 
-owner_user_id_raw = os.getenv("OWNER_USER_ID")
-if owner_user_id_raw is None:
-    raise RuntimeError("OWNER_USER_ID is not set")
-OWNER_USER_ID = int(owner_user_id_raw)
+ADMIN_USER_IDS = {
+    int(user_id.strip())
+    for user_id in os.getenv("ADMIN_USER_IDS", "").split(",")
+    if user_id.strip()
+}
+if not ADMIN_USER_IDS:
+    raise RuntimeError("ADMIN_USER_IDS is not set")
 
 if not TOKEN:
     raise RuntimeError("DISCORD_TOKEN is not set")
@@ -36,7 +38,6 @@ COLOR_SUCCESS = discord.Color.from_rgb(39, 174, 96)
 COLOR_DANGER = discord.Color.from_rgb(192, 57, 43)
 COLOR_NEUTRAL = discord.Color.from_rgb(88, 101, 242)
 
-admin_sessions: set[int] = set()
 api_startup_error: Exception | None = None
 
 
@@ -221,6 +222,12 @@ def api_delete_problem(problem_id: int):
     return res.json()
 
 
+def api_delete_user_data(user_id: int):
+    res = requests.delete(f"{API_URL}/users/{user_id}", timeout=10)
+    res.raise_for_status()
+    return res.json()
+
+
 def shorten(text: str, limit: int) -> str:
     if len(text) <= limit:
         return text
@@ -261,7 +268,14 @@ def filter_problems_by_difficulty(problems: list[dict], difficulty: str | None) 
 def build_problem_list_embed(problems: list[dict], difficulty: str | None = None) -> discord.Embed:
     filtered_problems = filter_problems_by_difficulty(problems, difficulty)
     title = "문제 목록" if difficulty is None else f"{difficulty} 문제 목록"
+    intro = (
+        "난이도를 선택하지 않아 전체 문제를 보여주고 있습니다.\n"
+        "원하면 `/문제` 명령에서 난이도를 함께 선택해 더 좁혀볼 수 있습니다."
+        if difficulty is None
+        else f"`{difficulty}` 난이도 문제만 보여주고 있습니다."
+    )
     description = (
+        f"{intro}\n"
         "드롭다운에서 문제를 고르면 상세 설명과 제출 버튼이 열립니다.\n"
         f"현재 표시 중인 문제: **{len(filtered_problems)}개**"
     )
@@ -384,8 +398,16 @@ def build_problem_deleted_embed(problem_id: int) -> discord.Embed:
     )
 
 
+def build_user_data_deleted_embed(member: discord.abc.User) -> discord.Embed:
+    return build_embed(
+        "사용자 데이터 삭제 완료",
+        f"대상: **{member.display_name}** (`{member.id}`)\n점수와 푼 문제 기록을 삭제했습니다.",
+        COLOR_SUCCESS,
+    )
+
+
 def require_admin(user_id: int) -> bool:
-    return user_id == OWNER_USER_ID or user_id in admin_sessions
+    return user_id in ADMIN_USER_IDS
 
 
 def parse_test_cases(raw_text: str) -> list[dict]:
@@ -670,21 +692,21 @@ async def problems_command(
             title = "문제 목록" if selected_difficulty is None else f"{selected_difficulty} 문제 목록"
             await interaction.response.send_message(
                 embed=build_embed(title, label, COLOR_DANGER),
-                ephemeral=True,
+                ephemeral=False,
             )
             return
 
         if not problems:
             await interaction.response.send_message(
                 embed=build_embed("문제 목록", "아직 등록된 문제가 없습니다.", COLOR_DANGER),
-                ephemeral=True,
+                ephemeral=False,
             )
             return
 
         await interaction.response.send_message(
             embed=build_problem_list_embed(problems, selected_difficulty),
             view=ProblemListView(filtered_problems),
-            ephemeral=True,
+            ephemeral=False,
         )
     except requests.HTTPError as e:
         try:
@@ -760,27 +782,11 @@ async def ranking_command(interaction: discord.Interaction):
             await interaction.response.send_message(f"오류 발생: {e}", ephemeral=True)
 
 
-@bot.tree.command(name="관리자인증", description="관리자 비밀번호로 인증합니다.")
-async def admin_login_command(interaction: discord.Interaction, 비밀번호: str):
-    if 비밀번호 == ADMIN_PASSWORD:
-        admin_sessions.add(interaction.user.id)
-        await interaction.response.send_message("관리자 인증이 완료되었습니다.", ephemeral=True)
-        return
-
-    await interaction.response.send_message("비밀번호가 올바르지 않습니다.", ephemeral=True)
-
-
-@bot.tree.command(name="관리자로그아웃", description="관리자 인증을 해제합니다.")
-async def admin_logout_command(interaction: discord.Interaction):
-    admin_sessions.discard(interaction.user.id)
-    await interaction.response.send_message("관리자 인증이 해제되었습니다.", ephemeral=True)
-
-
 @bot.tree.command(name="문제추가", description="관리자 전용 문제 추가 창을 엽니다.")
 async def add_problem_command(interaction: discord.Interaction):
     if not require_admin(interaction.user.id):
         await interaction.response.send_message(
-            "관리자 인증 후에만 사용할 수 있습니다. `/관리자인증`을 먼저 실행하세요.",
+            "관리자 전용 명령어입니다.",
             ephemeral=True,
         )
         return
@@ -792,7 +798,7 @@ async def add_problem_command(interaction: discord.Interaction):
 async def edit_problem_command(interaction: discord.Interaction, 문제번호: int):
     if not require_admin(interaction.user.id):
         await interaction.response.send_message(
-            "관리자 인증 후에만 사용할 수 있습니다. `/관리자인증`을 먼저 실행하세요.",
+            "관리자 전용 명령어입니다.",
             ephemeral=True,
         )
         return
@@ -820,7 +826,7 @@ async def edit_problem_command(interaction: discord.Interaction, 문제번호: i
 async def delete_problem_command(interaction: discord.Interaction, 문제번호: int):
     if not require_admin(interaction.user.id):
         await interaction.response.send_message(
-            "관리자 인증 후에만 사용할 수 있습니다. `/관리자인증`을 먼저 실행하세요.",
+            "관리자 전용 명령어입니다.",
             ephemeral=True,
         )
         return
@@ -835,6 +841,34 @@ async def delete_problem_command(interaction: discord.Interaction, 문제번호:
             detail = e.response.text
 
         await interaction.response.send_message(f"문제 삭제 실패: {detail}", ephemeral=True)
+    except Exception as e:
+        await interaction.response.send_message(f"오류 발생: {e}", ephemeral=True)
+
+
+@bot.tree.command(name="유저데이터삭제", description="관리자 전용 사용자 데이터 삭제 명령어입니다.")
+async def delete_user_data_command(interaction: discord.Interaction, 대상: discord.Member):
+    if not require_admin(interaction.user.id):
+        await interaction.response.send_message(
+            "관리자 전용 명령어입니다.",
+            ephemeral=True,
+        )
+        return
+
+    try:
+        api_delete_user_data(대상.id)
+        if interaction.guild is not None:
+            await sync_top_rank_role(interaction.guild)
+        await interaction.response.send_message(
+            embed=build_user_data_deleted_embed(대상),
+            ephemeral=True,
+        )
+    except requests.HTTPError as e:
+        try:
+            detail = e.response.json()
+        except Exception:
+            detail = e.response.text
+
+        await interaction.response.send_message(f"사용자 데이터 삭제 실패: {detail}", ephemeral=True)
     except Exception as e:
         await interaction.response.send_message(f"오류 발생: {e}", ephemeral=True)
 
