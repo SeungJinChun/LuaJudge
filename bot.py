@@ -163,10 +163,16 @@ async def get_guild_rankings(guild: discord.Guild) -> list[tuple[discord.Member,
 async def sync_top_rank_role(guild: discord.Guild):
     role = await ensure_top_rank_role(guild)
     if role is None:
+        print(f"Top rank role sync skipped in guild {guild.id}: role not found or cannot be created")
         return
 
     me = guild.me
     if me is None or not me.guild_permissions.manage_roles or role >= me.top_role:
+        print(
+            f"Top rank role sync skipped in guild {guild.id}: "
+            f"manage_roles={None if me is None else me.guild_permissions.manage_roles}, "
+            f"role_position_ok={False if me is None else role < me.top_role}"
+        )
         return
 
     guild_rankings = await get_guild_rankings(guild)
@@ -176,6 +182,11 @@ async def sync_top_rank_role(guild: discord.Guild):
         top_score = guild_rankings[0][1]
         top_members = {user_id for _, score, user_id in guild_rankings if score == top_score}
 
+    print(
+        f"Top rank role sync in guild {guild.id}: "
+        f"role={role.name}, top_members={sorted(top_members)}, current_members={[member.id for member in role.members]}"
+    )
+
     current_members = {member.id for member in role.members}
 
     for member_id in current_members - top_members:
@@ -184,13 +195,16 @@ async def sync_top_rank_role(guild: discord.Guild):
             try:
                 member = await guild.fetch_member(member_id)
             except (discord.NotFound, discord.Forbidden, discord.HTTPException):
+                print(f"Top rank role removal skipped in guild {guild.id}: member {member_id} fetch failed")
                 continue
         await member.remove_roles(role, reason="랭킹 1등 변경")
+        print(f"Top rank role removed in guild {guild.id}: user_id={member.id}")
 
     for member, _, user_id in guild_rankings:
         if user_id not in top_members or role in member.roles:
             continue
         await member.add_roles(role, reason="랭킹 1등 부여")
+        print(f"Top rank role added in guild {guild.id}: user_id={member.id}")
 
 
 def api_submit(problem_id: int, source_code: str, user_id: int):
@@ -894,6 +908,27 @@ async def delete_user_data_command(interaction: discord.Interaction, 대상: dis
             detail = e.response.text
 
         await interaction.followup.send(f"사용자 데이터 삭제 실패: {detail}", ephemeral=True)
+    except Exception as e:
+        await interaction.followup.send(f"오류 발생: {e}", ephemeral=True)
+
+
+@bot.tree.command(name="랭킹역할동기화", description="관리자 전용 랭킹 1등 역할 동기화 명령어입니다.")
+async def sync_rank_role_command(interaction: discord.Interaction):
+    if not require_admin(interaction.user.id):
+        await interaction.response.send_message(
+            "관리자 전용 명령어입니다.",
+            ephemeral=True,
+        )
+        return
+
+    if interaction.guild is None:
+        await interaction.response.send_message("서버에서만 사용할 수 있습니다.", ephemeral=True)
+        return
+
+    try:
+        await interaction.response.defer(ephemeral=True)
+        await sync_top_rank_role(interaction.guild)
+        await interaction.followup.send("랭킹 역할 동기화를 완료했습니다.", ephemeral=True)
     except Exception as e:
         await interaction.followup.send(f"오류 발생: {e}", ephemeral=True)
 
