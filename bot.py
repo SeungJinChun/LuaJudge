@@ -494,6 +494,7 @@ def stringify_test_cases(problem: dict) -> str:
 
 
 intents = discord.Intents.default()
+intents.members = True
 bot = commands.Bot(command_prefix="!", intents=intents)
 
 
