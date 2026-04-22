@@ -650,3 +650,7 @@ def get_rankings():
         raise HTTPException(status_code=500, detail=str(e))
     finally:
         db.close()
+
+@app.get("/health")
+def health():
+    return {"ok": True}
