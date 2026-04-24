@@ -1,6 +1,6 @@
 from fastapi import FastAPI, HTTPException
 from pydantic import BaseModel, Field
-from sqlalchemy import text
+from sqlalchemy import inspect, text
 from sqlalchemy.exc import IntegrityError
 import json
 import logging
@@ -27,37 +27,38 @@ Base.metadata.create_all(bind=engine)
 
 
 def ensure_schema():
+    inspector = inspect(engine)
+    dialect = engine.dialect.name
+
     with engine.begin() as conn:
-        conn.execute(
-            text(
-                "ALTER TABLE problems "
-                "ADD COLUMN IF NOT EXISTS score INTEGER NOT NULL DEFAULT 0"
+        problem_columns = {column["name"] for column in inspector.get_columns("problems")}
+        if "score" not in problem_columns:
+            conn.execute(
+                text(
+                    "ALTER TABLE problems "
+                    "ADD COLUMN score INTEGER NOT NULL DEFAULT 0"
+                )
             )
-        )
-        conn.execute(
-            text(
-                "ALTER TABLE test_cases "
-                "ADD COLUMN IF NOT EXISTS input_json TEXT"
+
+        test_case_columns = {column["name"] for column in inspector.get_columns("test_cases")}
+        if "input_json" not in test_case_columns:
+            conn.execute(text("ALTER TABLE test_cases ADD COLUMN input_json TEXT"))
+        if "expected_json" not in test_case_columns:
+            conn.execute(text("ALTER TABLE test_cases ADD COLUMN expected_json TEXT"))
+
+        if dialect == "postgresql":
+            conn.execute(
+                text(
+                    "ALTER TABLE test_cases "
+                    "ALTER COLUMN input_value DROP NOT NULL"
+                )
             )
-        )
-        conn.execute(
-            text(
-                "ALTER TABLE test_cases "
-                "ADD COLUMN IF NOT EXISTS expected_json TEXT"
+            conn.execute(
+                text(
+                    "ALTER TABLE test_cases "
+                    "ALTER COLUMN expected_output DROP NOT NULL"
+                )
             )
-        )
-        conn.execute(
-            text(
-                "ALTER TABLE test_cases "
-                "ALTER COLUMN input_value DROP NOT NULL"
-            )
-        )
-        conn.execute(
-            text(
-                "ALTER TABLE test_cases "
-                "ALTER COLUMN expected_output DROP NOT NULL"
-            )
-        )
 
 
 ensure_schema()
@@ -683,3 +684,13 @@ def get_rankings():
 @app.api_route("/health", methods=["GET", "HEAD"])
 def health():
     return {"ok": True}
+
+
+if __name__ == "__main__":
+    import uvicorn
+
+    uvicorn.run(
+        "app:app",
+        host="0.0.0.0",
+        port=int(os.getenv("PORT", os.getenv("API_PORT", "8000"))),
+    )

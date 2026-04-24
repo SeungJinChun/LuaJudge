@@ -15,6 +15,6 @@ RUN pip install --no-cache-dir -r requirements.txt
 COPY . .
 
 ENV LUA_BIN=lua5.4
-ENV START_INTERNAL_API=true
+ENV START_INTERNAL_API=false
 
-CMD ["python", "bot.py"]
+CMD ["python", "app.py"]

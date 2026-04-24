@@ -21,7 +21,7 @@ BOT_LOGIN_RETRY_COUNT = int(os.getenv("BOT_LOGIN_RETRY_COUNT", "5"))
 BOT_LOGIN_RETRY_DELAY = int(os.getenv("BOT_LOGIN_RETRY_DELAY", "30"))
 API_STARTUP_TIMEOUT = int(os.getenv("API_STARTUP_TIMEOUT", "60"))
 TOP_RANK_ROLE_ID = os.getenv("TOP_RANK_ROLE_ID")
-TOP_RANK_ROLE_NAME = os.getenv("TOP_RANK_ROLE_NAME", "??�� 1??)
+TOP_RANK_ROLE_NAME = os.getenv("TOP_RANK_ROLE_NAME", "랭킹 1등")
 
 ADMIN_USER_IDS = {
     int(user_id.strip())
@@ -142,7 +142,7 @@ async def ensure_top_rank_role(guild: discord.Guild) -> discord.Role | None:
 
     return await guild.create_role(
         name=TOP_RANK_ROLE_NAME,
-        reason="??�� 1????�� ?�동 ?�성",
+        reason="랭킹 1등 역할 자동 생성",
     )
 
 
@@ -198,13 +198,13 @@ async def sync_top_rank_role(guild: discord.Guild):
             except (discord.NotFound, discord.Forbidden, discord.HTTPException):
                 print(f"Top rank role removal skipped in guild {guild.id}: member {member_id} fetch failed")
                 continue
-        await member.remove_roles(role, reason="??�� 1??변�?)
+        await member.remove_roles(role, reason="랭킹 1등 변경")
         print(f"Top rank role removed in guild {guild.id}: user_id={member.id}")
 
     for member, _, user_id in guild_rankings:
         if user_id not in top_members or role in member.roles:
             continue
-        await member.add_roles(role, reason="??�� 1??부??)
+        await member.add_roles(role, reason="랭킹 1등 부여")
         print(f"Top rank role added in guild {guild.id}: user_id={member.id}")
 
 
@@ -259,10 +259,10 @@ def build_embed(title: str, description: str, color: discord.Color) -> discord.E
 
 
 def format_problem_meta(problem: dict) -> str:
-    return f"{problem['score']}??· {problem['difficulty']}"
+    return f"{problem['score']}점 · {problem['difficulty']}"
 
 
-DIFFICULTY_ORDER = ["?��?", "보통", "?�려?�", "미침", "불�???]
+DIFFICULTY_ORDER = ["쉬움", "보통", "어려움", "미침", "불가능"]
 
 
 def sort_problems_by_difficulty(problems: list[dict]) -> list[dict]:
@@ -287,15 +287,15 @@ def build_problem_list_embed(problems: list[dict], difficulty: str | None = None
     filtered_problems = filter_problems_by_difficulty(problems, difficulty)
     title = "문제 목록" if difficulty is None else f"{difficulty} 문제 목록"
     intro = (
-        "?�이?��? ?�택?��? ?�아 ?�체 문제�?보여주고 ?�습?�다.\n"
-        "?�하�?`/문제` 명령?�서 ?�이?��? ?�께 ?�택????좁�?�????�습?�다."
+        "난이도를 선택하지 않아 전체 문제를 보여주고 있습니다.\n"
+        "원하면 `/문제` 명령에서 난이도를 함께 선택해 더 좁혀볼 수 있습니다."
         if difficulty is None
-        else f"`{difficulty}` ?�이??문제�?보여주고 ?�습?�다."
+        else f"`{difficulty}` 난이도 문제만 보여주고 있습니다."
     )
     description = (
         f"{intro}\n"
-        "?�롭?�운?�서 문제�?고르�??�세 ?�명�??�출 버튼???�립?�다.\n"
-        f"?�재 ?�시 중인 문제: **{len(filtered_problems)}�?*"
+        "드롭다운에서 문제를 고르면 상세 설명과 제출 버튼이 열립니다.\n"
+        f"현재 표시 중인 문제: **{len(filtered_problems)}개**"
     )
     embed = build_embed(title, description, COLOR_PRIMARY)
 
@@ -305,22 +305,22 @@ def build_problem_list_embed(problems: list[dict], difficulty: str | None = None
             continue
 
         lines = [
-            f"`#{problem['id']}` {problem['title']} ({problem['score']}??"
+            f"`#{problem['id']}` {problem['title']} ({problem['score']}점)"
             for problem in group[:8]
         ]
         if len(group) > 8:
-            lines.append(f"... ??{len(group) - 8}�?)
+            lines.append(f"... 외 {len(group) - 8}개")
 
         embed.add_field(
-            name=f"{difficulty_name} · {len(group)}�?,
+            name=f"{difficulty_name} · {len(group)}개",
             value="\n".join(lines),
             inline=False,
         )
 
     if len(filtered_problems) > 25:
         embed.add_field(
-            name="?�내",
-            value="?�롭?�운?�는 최�? 25�?문제까�?�??�시?�니??",
+            name="안내",
+            value="드롭다운에는 최대 25개 문제까지만 표시됩니다.",
             inline=False,
         )
 
@@ -333,13 +333,13 @@ def build_problem_detail_embed(problem: dict) -> discord.Embed:
         problem["description"],
         COLOR_NEUTRAL,
     )
-    embed.add_field(name="?�스?��??�스", value=f"`{problem['test_cases_count']}�?", inline=True)
-    embed.add_field(name="?�수", value=f"`{problem['score']}??", inline=True)
-    embed.add_field(name="?�이??, value=f"`{problem['difficulty']}`", inline=True)
-    embed.add_field(name="?�어", value="`Lua`", inline=True)
+    embed.add_field(name="테스트케이스", value=f"`{problem['test_cases_count']}개`", inline=True)
+    embed.add_field(name="점수", value=f"`{problem['score']}점`", inline=True)
+    embed.add_field(name="난이도", value=f"`{problem['difficulty']}`", inline=True)
+    embed.add_field(name="언어", value="`Lua`", inline=True)
     embed.add_field(
-        name="?�출 방식",
-        value="?�래 버튼???�러 `solution(...)` ?�수�??�출?�세??",
+        name="제출 방식",
+        value="아래 버튼을 눌러 `solution(...)` 함수를 제출하세요.",
         inline=False,
     )
     return embed
@@ -349,18 +349,18 @@ def build_public_submit_embed(user_name: str, problem_title: str, result: dict) 
     accepted = result["status"] == "ACCEPTED"
     lines = [
         f"문제: **{problem_title}**",
-        f"?�공 ?��?: **{'?�공' if accepted else '?�패'}**",
-        f"맞�? ?�스??케?�스: **{result['passed_count']} / {result['total_count']}**",
-        f"?�재 ?�수: **{result['total_score']}??*",
+        f"성공 여부: **{'성공' if accepted else '실패'}**",
+        f"맞은 테스트 케이스: **{result['passed_count']} / {result['total_count']}**",
+        f"현재 점수: **{result['total_score']}점**",
     ]
 
     if accepted:
         if result["awarded_score"] > 0:
-            lines.append(f"?�득 ?�수: **+{result['awarded_score']}??*")
+            lines.append(f"획득 점수: **+{result['awarded_score']}점**")
         elif result["already_solved"]:
-            lines.append("(?��? ??문제?�니??")
+            lines.append("(이미 푼 문제입니다)")
         elif result["problem_score"] == 0:
-            lines.append("??문제??**0??문제**?�니??")
+            lines.append("이 문제는 **0점 문제**입니다.")
     else:
         failed_results = [case for case in result.get("results", []) if not case.get("passed")]
         mismatch_case = next(
@@ -374,17 +374,17 @@ def build_public_submit_embed(user_name: str, problem_title: str, result: dict) 
 
         if mismatch_case is not None:
             lines.append("")
-            lines.append("�??�답 케?�스:")
-            lines.append(f"?�력: `{json.dumps(mismatch_case['input_values'], ensure_ascii=False)}`")
-            lines.append(f"기�?�? `{json.dumps(mismatch_case['expected_output'], ensure_ascii=False)}`")
-            lines.append(f"?�제�? `{json.dumps(mismatch_case.get('actual'), ensure_ascii=False)}`")
+            lines.append("첫 오답 케이스:")
+            lines.append(f"입력: `{json.dumps(mismatch_case['input_values'], ensure_ascii=False)}`")
+            lines.append(f"기대값: `{json.dumps(mismatch_case['expected_output'], ensure_ascii=False)}`")
+            lines.append(f"실제값: `{json.dumps(mismatch_case.get('actual'), ensure_ascii=False)}`")
         if runtime_case is not None:
-            error_text = str(runtime_case.get("error", "?�행 ?�류"))
+            error_text = str(runtime_case.get("error", "실행 오류"))
             lines.append("")
-            lines.append(f"?�행 ?�류: `{error_text}`")
+            lines.append(f"실행 오류: `{error_text}`")
 
     return build_embed(
-        f"{user_name} ?�출 결과",
+        f"{user_name} 제출 결과",
         "\n".join(lines),
         COLOR_SUCCESS if accepted else COLOR_DANGER,
     )
@@ -392,8 +392,8 @@ def build_public_submit_embed(user_name: str, problem_title: str, result: dict) 
 
 def build_score_embed(user_name: str, score: int) -> discord.Embed:
     return build_embed(
-        f"{user_name} ?�수",
-        f"?�재 ?�수??**{score}??*?�니??",
+        f"{user_name} 점수",
+        f"현재 점수는 **{score}점**입니다.",
         COLOR_PRIMARY,
     )
 
@@ -404,14 +404,14 @@ def build_ranking_embed(guild_name: str, ranking_lines: list[str], my_rank_text:
     if ranking_lines:
         description_lines.extend(ranking_lines)
     else:
-        description_lines.append("?�직 ???�버????�� ?�이?��? ?�습?�다.")
+        description_lines.append("아직 이 서버의 랭킹 데이터가 없습니다.")
 
     if my_rank_text:
         description_lines.append("")
         description_lines.append(my_rank_text)
 
     return build_embed(
-        f"{guild_name} ??��",
+        f"{guild_name} 랭킹",
         "\n".join(description_lines),
         COLOR_PRIMARY,
     )
@@ -419,28 +419,28 @@ def build_ranking_embed(guild_name: str, ranking_lines: list[str], my_rank_text:
 
 def build_problem_saved_embed(problem: dict, action: str) -> discord.Embed:
     return build_embed(
-        f"문제 {action} ?�료",
+        f"문제 {action} 완료",
         f"문제 번호: **#{problem['id']}**\n"
-        f"?�목: **{problem['title']}**\n"
-        f"?�수: **{problem['score']}??*\n"
-        f"?�이?? **{problem['difficulty']}**\n"
-        f"?�스?��??�스: **{problem['test_cases_count']}�?*",
+        f"제목: **{problem['title']}**\n"
+        f"점수: **{problem['score']}점**\n"
+        f"난이도: **{problem['difficulty']}**\n"
+        f"테스트케이스: **{problem['test_cases_count']}개**",
         COLOR_SUCCESS,
     )
 
 
 def build_problem_deleted_embed(problem_id: int) -> discord.Embed:
     return build_embed(
-        "문제 ??�� ?�료",
-        f"문제 **#{problem_id}** �???��?�습?�다.",
+        "문제 삭제 완료",
+        f"문제 **#{problem_id}** 를 삭제했습니다.",
         COLOR_SUCCESS,
     )
 
 
 def build_user_data_deleted_embed(member: discord.abc.User) -> discord.Embed:
     return build_embed(
-        "?�용???�이????�� ?�료",
-        f"?�?? **{member.display_name}** (`{member.id}`)\n?�수?� ??문제 기록????��?�습?�다.",
+        "사용자 데이터 삭제 완료",
+        f"대상: **{member.display_name}** (`{member.id}`)\n점수와 푼 문제 기록을 삭제했습니다.",
         COLOR_SUCCESS,
     )
 
@@ -459,7 +459,7 @@ def parse_test_cases(raw_text: str) -> list[dict]:
 
         if "=>" not in stripped:
             raise ValueError(
-                f"{index}번째 �??�식???�바르�? ?�습?�다. `매개변?�들 => 기�?�??�로 ?�어주세??"
+                f"{index}번째 줄 형식이 올바르지 않습니다. `매개변수들 => 기대값`으로 적어주세요."
             )
 
         input_text, expected_text = stripped.split("=>", 1)
@@ -468,7 +468,7 @@ def parse_test_cases(raw_text: str) -> list[dict]:
             expected_output = json.loads(expected_text.strip())
         except ValueError as exc:
             raise ValueError(
-                f"{index}번째 줄�? JSON ?�식?�로 ?�어주세?? ?? [1, \"a\", true] => \"ok\""
+                f"{index}번째 줄은 JSON 형식으로 적어주세요. 예: [1, \"a\", true] => \"ok\""
             ) from exc
 
         input_values = input_value if isinstance(input_value, list) else [input_value]
@@ -480,7 +480,7 @@ def parse_test_cases(raw_text: str) -> list[dict]:
         )
 
     if not test_cases:
-        raise ValueError("?�스?��??�스�???�??�상 ?�력?�주?�요.")
+        raise ValueError("테스트케이스를 한 줄 이상 입력해주세요.")
 
     return test_cases
 
@@ -507,14 +507,14 @@ async def on_ready():
             await sync_top_rank_role(guild)
         except Exception as exc:
             print(f"Top rank role sync failed in guild {guild.id}: {exc}")
-    print(f"{bot.user} 로그???�료")
-    print("?�래??명령???�기???�료")
-    print("?�기?�된 명령??", [command.name for command in synced])
+    print(f"{bot.user} 로그인 완료")
+    print("슬래시 명령어 동기화 완료")
+    print("동기화된 명령어:", [command.name for command in synced])
 
 
-class SubmitModal(discord.ui.Modal, title="Lua 코드 ?�출"):
+class SubmitModal(discord.ui.Modal, title="Lua 코드 제출"):
     source_code = discord.ui.TextInput(
-        label="solution(...) ?�수�??�력?�세??",
+        label="solution(...) 함수를 입력하세요.",
         style=discord.TextStyle.paragraph,
         placeholder="function solution(a)\n    return a * a\nend",
         required=True,
@@ -567,31 +567,31 @@ class SubmitModal(discord.ui.Modal, title="Lua 코드 ?�출"):
             except Exception:
                 detail = e.response.text
 
-            await interaction.followup.send(f"?�출 ?�패: {detail}", ephemeral=True)
+            await interaction.followup.send(f"제출 실패: {detail}", ephemeral=True)
         except Exception as e:
-            await interaction.followup.send(f"?�류 발생: {e}", ephemeral=True)
+            await interaction.followup.send(f"오류 발생: {e}", ephemeral=True)
 
 
 class ProblemFormModal(discord.ui.Modal):
-    title_input = discord.ui.TextInput(label="문제 ?�목", placeholder="?? ?????�곱", required=True, max_length=200)
+    title_input = discord.ui.TextInput(label="문제 제목", placeholder="예: 두 수 제곱", required=True, max_length=200)
     description_input = discord.ui.TextInput(
-        label="문제 ?�명",
+        label="문제 설명",
         style=discord.TextStyle.paragraph,
-        placeholder="?? a???�곱??반환?�세??",
+        placeholder="예: a의 제곱을 반환하세요.",
         required=True,
         max_length=1000,
     )
-    score_input = discord.ui.TextInput(label="문제 ?�수", placeholder="?? 100", required=True, max_length=10)
+    score_input = discord.ui.TextInput(label="문제 점수", placeholder="예: 100", required=True, max_length=10)
     test_cases_input = discord.ui.TextInput(
-        label="?�스?��??�스",
+        label="테스트케이스",
         style=discord.TextStyle.paragraph,
-        placeholder='??줄마??[매개변?�들] => 기�?�?n?? [2, "a", true] => "ok"',
+        placeholder='한 줄마다 [매개변수들] => 기대값\n예: [2, "a", true] => "ok"',
         required=True,
         max_length=4000,
     )
 
     def __init__(self, mode: str, problem_id: int | None = None, initial_problem: dict | None = None):
-        title_text = "문제 추�?" if mode == "create" else f"문제 ?�정 #{problem_id}"
+        title_text = "문제 추가" if mode == "create" else f"문제 수정 #{problem_id}"
         super().__init__(title=title_text)
         self.mode = mode
         self.problem_id = problem_id
@@ -604,7 +604,7 @@ class ProblemFormModal(discord.ui.Modal):
 
     async def on_submit(self, interaction: discord.Interaction):
         if not require_admin(interaction.user.id):
-            await interaction.response.send_message("관리자 ?�증 ?�에�??�용?????�습?�다.", ephemeral=True)
+            await interaction.response.send_message("관리자 인증 후에만 사용할 수 있습니다.", ephemeral=True)
             return
 
         try:
@@ -618,31 +618,31 @@ class ProblemFormModal(discord.ui.Modal):
 
             if self.mode == "create":
                 saved_problem = await asyncio.to_thread(api_create_problem, problem_data)
-                action = "추�?"
+                action = "추가"
             else:
                 saved_problem = await asyncio.to_thread(
                     api_update_problem,
                     self.problem_id,
                     problem_data,
                 )
-                action = "?�정"
+                action = "수정"
 
             await interaction.followup.send(
                 embed=build_problem_saved_embed(saved_problem, action),
                 ephemeral=False,
             )
         except ValueError as e:
-            await interaction.followup.send(f"?�력 ?�식 ?�류: {e}", ephemeral=True)
+            await interaction.followup.send(f"입력 형식 오류: {e}", ephemeral=True)
         except requests.HTTPError as e:
             try:
                 detail = e.response.json()
             except Exception:
                 detail = e.response.text
 
-            label = "문제 추�? ?�패" if self.mode == "create" else "문제 ?�정 ?�패"
+            label = "문제 추가 실패" if self.mode == "create" else "문제 수정 실패"
             await interaction.followup.send(f"{label}: {detail}", ephemeral=True)
         except Exception as e:
-            await interaction.followup.send(f"?�류 발생: {e}", ephemeral=True)
+            await interaction.followup.send(f"오류 발생: {e}", ephemeral=True)
 
 
 class ProblemDetailView(discord.ui.View):
@@ -652,13 +652,13 @@ class ProblemDetailView(discord.ui.View):
         self.problem_title = problem_title
         self.problems = problems
 
-    @discord.ui.button(label="코드 ?�출", style=discord.ButtonStyle.success)
+    @discord.ui.button(label="코드 제출", style=discord.ButtonStyle.success)
     async def submit_button(self, interaction: discord.Interaction, button: discord.ui.Button):
         await interaction.response.send_modal(
             SubmitModal(self.problem_id, self.problem_title, interaction, self.problems)
         )
 
-    @discord.ui.button(label="목록?�로 ?�아가�?, style=discord.ButtonStyle.secondary)
+    @discord.ui.button(label="목록으로 돌아가기", style=discord.ButtonStyle.secondary)
     async def back_button(self, interaction: discord.Interaction, button: discord.ui.Button):
         await interaction.response.edit_message(
             embed=build_problem_list_embed(self.problems),
@@ -681,7 +681,7 @@ class ProblemSelect(discord.ui.Select):
             )
 
         super().__init__(
-            placeholder="문제�??�택?�세??",
+            placeholder="문제를 선택하세요.",
             min_values=1,
             max_values=1,
             options=options,
@@ -702,9 +702,9 @@ class ProblemSelect(discord.ui.Select):
             except Exception:
                 detail = e.response.text
 
-            await interaction.followup.send(f"문제 조회 ?�패: {detail}", ephemeral=True)
+            await interaction.followup.send(f"문제 조회 실패: {detail}", ephemeral=True)
         except Exception as e:
-            await interaction.followup.send(f"?�류 발생: {e}", ephemeral=True)
+            await interaction.followup.send(f"오류 발생: {e}", ephemeral=True)
 
 
 class ProblemListView(discord.ui.View):
@@ -713,30 +713,30 @@ class ProblemListView(discord.ui.View):
         self.add_item(ProblemSelect(problems))
 
 
-@bot.tree.command(name="문제", description="문제 목록??보여줍니??")
-@discord.app_commands.describe(?�이??"?�정 ?�이?�만 보고 ?�으�??�택?�세??")
+@bot.tree.command(name="문제", description="문제 목록을 보여줍니다.")
+@discord.app_commands.describe(난이도="특정 난이도만 보고 싶으면 선택하세요.")
 @discord.app_commands.choices(
-    ?�이??[
-        discord.app_commands.Choice(name="?�체문제", value="?�체문제"),
-        discord.app_commands.Choice(name="?��?", value="?��?"),
+    난이도=[
+        discord.app_commands.Choice(name="전체문제", value="전체문제"),
+        discord.app_commands.Choice(name="쉬움", value="쉬움"),
         discord.app_commands.Choice(name="보통", value="보통"),
-        discord.app_commands.Choice(name="?�려?�", value="?�려?�"),
+        discord.app_commands.Choice(name="어려움", value="어려움"),
         discord.app_commands.Choice(name="미침", value="미침"),
-        discord.app_commands.Choice(name="불�???, value="불�???),
+        discord.app_commands.Choice(name="불가능", value="불가능"),
     ]
 )
 async def problems_command(
     interaction: discord.Interaction,
-    ?�이?? discord.app_commands.Choice[str] | None = None,
+    난이도: discord.app_commands.Choice[str] | None = None,
 ):
     try:
         await interaction.response.defer()
         problems = await asyncio.to_thread(api_get_problems)
-        selected_difficulty = None if ?�이??is None or ?�이??value == "?�체문제" else ?�이??value
+        selected_difficulty = None if 난이도 is None or 난이도.value == "전체문제" else 난이도.value
         filtered_problems = filter_problems_by_difficulty(problems, selected_difficulty)
 
         if not filtered_problems:
-            label = "?�당 ?�이?�의 문제가 ?�습?�다." if selected_difficulty else "?�직 ?�록??문제가 ?�습?�다."
+            label = "해당 난이도의 문제가 없습니다." if selected_difficulty else "아직 등록된 문제가 없습니다."
             title = "문제 목록" if selected_difficulty is None else f"{selected_difficulty} 문제 목록"
             await interaction.followup.send(
                 embed=build_embed(title, label, COLOR_DANGER),
@@ -746,7 +746,7 @@ async def problems_command(
 
         if not problems:
             await interaction.followup.send(
-                embed=build_embed("문제 목록", "?�직 ?�록??문제가 ?�습?�다.", COLOR_DANGER),
+                embed=build_embed("문제 목록", "아직 등록된 문제가 없습니다.", COLOR_DANGER),
                 ephemeral=False,
             )
             return
@@ -762,12 +762,12 @@ async def problems_command(
         except Exception:
             detail = e.response.text
 
-        await interaction.followup.send(f"문제 목록 조회 ?�패: {detail}", ephemeral=True)
+        await interaction.followup.send(f"문제 목록 조회 실패: {detail}", ephemeral=True)
     except Exception as e:
-        await interaction.followup.send(f"?�류 발생: {e}", ephemeral=True)
+        await interaction.followup.send(f"오류 발생: {e}", ephemeral=True)
 
 
-@bot.tree.command(name="?�수", description="???�수�??�인?�니??")
+@bot.tree.command(name="점수", description="내 점수를 확인합니다.")
 async def score_command(interaction: discord.Interaction):
     try:
         await interaction.response.defer(ephemeral=True)
@@ -782,16 +782,16 @@ async def score_command(interaction: discord.Interaction):
         except Exception:
             detail = e.response.text
 
-        await interaction.followup.send(f"?�수 조회 ?�패: {detail}", ephemeral=True)
+        await interaction.followup.send(f"점수 조회 실패: {detail}", ephemeral=True)
     except Exception as e:
-        await interaction.followup.send(f"?�류 발생: {e}", ephemeral=True)
+        await interaction.followup.send(f"오류 발생: {e}", ephemeral=True)
 
 
-@bot.tree.command(name="??��", description="???�버???�수 ??��???�인?�니??")
+@bot.tree.command(name="랭킹", description="이 서버의 점수 랭킹을 확인합니다.")
 async def ranking_command(interaction: discord.Interaction):
     if interaction.guild is None:
         await interaction.response.send_message(
-            "?�버 ?�에?�만 ?�용?????�는 명령?�입?�다.",
+            "서버 안에서만 사용할 수 있는 명령어입니다.",
             ephemeral=True,
         )
         return
@@ -801,16 +801,16 @@ async def ranking_command(interaction: discord.Interaction):
         guild_rankings = await get_guild_rankings(interaction.guild)
 
         ranking_lines = [
-            f"**{index}.** {name} - **{score}??*"
+            f"**{index}.** {name} - **{score}점**"
             for index, (member, score, _) in enumerate(guild_rankings[:10], start=1)
             for name in [member.display_name]
         ]
 
         top_role = get_top_rank_role(interaction.guild)
-        my_rank_text = f"1????��: **{top_role.name}**" if top_role is not None else None
+        my_rank_text = f"1등 역할: **{top_role.name}**" if top_role is not None else None
         for index, (_, score, user_id) in enumerate(guild_rankings, start=1):
             if user_id == interaction.user.id:
-                rank_line = f"???�위: **{index}??* · **{score}??*"
+                rank_line = f"내 순위: **{index}위** · **{score}점**"
                 my_rank_text = rank_line if my_rank_text is None else f"{my_rank_text}\n{rank_line}"
                 break
 
@@ -823,19 +823,19 @@ async def ranking_command(interaction: discord.Interaction):
         except Exception:
             detail = e.response.text
 
-        await interaction.followup.send(f"??�� 조회 ?�패: {detail}", ephemeral=True)
+        await interaction.followup.send(f"랭킹 조회 실패: {detail}", ephemeral=True)
     except Exception as e:
         if interaction.response.is_done():
-            await interaction.followup.send(f"?�류 발생: {e}", ephemeral=True)
+            await interaction.followup.send(f"오류 발생: {e}", ephemeral=True)
         else:
-            await interaction.response.send_message(f"?�류 발생: {e}", ephemeral=True)
+            await interaction.response.send_message(f"오류 발생: {e}", ephemeral=True)
 
 
-@bot.tree.command(name="문제추�?", description="관리자 ?�용 문제 추�? 창을 ?�니??")
+@bot.tree.command(name="문제추가", description="관리자 전용 문제 추가 창을 엽니다.")
 async def add_problem_command(interaction: discord.Interaction):
     if not require_admin(interaction.user.id):
         await interaction.response.send_message(
-            "관리자 ?�용 명령?�입?�다.",
+            "관리자 전용 명령어입니다.",
             ephemeral=True,
         )
         return
@@ -843,11 +843,11 @@ async def add_problem_command(interaction: discord.Interaction):
     await interaction.response.send_modal(ProblemFormModal("create"))
 
 
-@bot.tree.command(name="문제?�정", description="관리자 ?�용 문제 ?�정 창을 ?�니??")
+@bot.tree.command(name="문제수정", description="관리자 전용 문제 수정 창을 엽니다.")
 async def edit_problem_command(interaction: discord.Interaction, 문제번호: int):
     if not require_admin(interaction.user.id):
         await interaction.response.send_message(
-            "관리자 ?�용 명령?�입?�다.",
+            "관리자 전용 명령어입니다.",
             ephemeral=True,
         )
         return
@@ -861,16 +861,16 @@ async def edit_problem_command(interaction: discord.Interaction, 문제번호: i
         except Exception:
             detail = e.response.text
 
-        await interaction.response.send_message(f"문제 조회 ?�패: {detail}", ephemeral=True)
+        await interaction.response.send_message(f"문제 조회 실패: {detail}", ephemeral=True)
     except Exception as e:
-        await interaction.response.send_message(f"?�류 발생: {e}", ephemeral=True)
+        await interaction.response.send_message(f"오류 발생: {e}", ephemeral=True)
 
 
-@bot.tree.command(name="문제??��", description="관리자 ?�용 문제 ??�� 명령?�입?�다.")
+@bot.tree.command(name="문제삭제", description="관리자 전용 문제 삭제 명령어입니다.")
 async def delete_problem_command(interaction: discord.Interaction, 문제번호: int):
     if not require_admin(interaction.user.id):
         await interaction.response.send_message(
-            "관리자 ?�용 명령?�입?�다.",
+            "관리자 전용 명령어입니다.",
             ephemeral=True,
         )
         return
@@ -885,30 +885,30 @@ async def delete_problem_command(interaction: discord.Interaction, 문제번호:
         except Exception:
             detail = e.response.text
 
-        await interaction.followup.send(f"문제 ??�� ?�패: {detail}", ephemeral=True)
+        await interaction.followup.send(f"문제 삭제 실패: {detail}", ephemeral=True)
     except Exception as e:
-        await interaction.followup.send(f"?�류 발생: {e}", ephemeral=True)
+        await interaction.followup.send(f"오류 발생: {e}", ephemeral=True)
 
 
-@bot.tree.command(name="?��??�이?�삭??, description="관리자 ?�용 ?�용???�이????�� 명령?�입?�다.")
-async def delete_user_data_command(interaction: discord.Interaction, ?�?? discord.Member):
+@bot.tree.command(name="유저데이터삭제", description="관리자 전용 사용자 데이터 삭제 명령어입니다.")
+async def delete_user_data_command(interaction: discord.Interaction, 대상: discord.Member):
     if not require_admin(interaction.user.id):
         await interaction.response.send_message(
-            "관리자 ?�용 명령?�입?�다.",
+            "관리자 전용 명령어입니다.",
             ephemeral=True,
         )
         return
 
     try:
         await interaction.response.defer(ephemeral=True)
-        await asyncio.to_thread(api_delete_user_data, ?�??id)
+        await asyncio.to_thread(api_delete_user_data, 대상.id)
         if interaction.guild is not None:
             top_role = get_top_rank_role(interaction.guild)
-            if top_role is not None and top_role in ?�??roles:
-                await ?�??remove_roles(top_role, reason="?�용???�이????��")
+            if top_role is not None and top_role in 대상.roles:
+                await 대상.remove_roles(top_role, reason="사용자 데이터 삭제")
             await sync_top_rank_role(interaction.guild)
         await interaction.followup.send(
-            embed=build_user_data_deleted_embed(?�??),
+            embed=build_user_data_deleted_embed(대상),
             ephemeral=True,
         )
     except requests.HTTPError as e:
@@ -917,9 +917,9 @@ async def delete_user_data_command(interaction: discord.Interaction, ?�?? discor
         except Exception:
             detail = e.response.text
 
-        await interaction.followup.send(f"?�용???�이????�� ?�패: {detail}", ephemeral=True)
+        await interaction.followup.send(f"사용자 데이터 삭제 실패: {detail}", ephemeral=True)
     except Exception as e:
-        await interaction.followup.send(f"?�류 발생: {e}", ephemeral=True)
+        await interaction.followup.send(f"오류 발생: {e}", ephemeral=True)
 
 
 if __name__ == "__main__":
@@ -929,4 +929,3 @@ if __name__ == "__main__":
         wait_for_api_server()
 
     run_bot_with_retries()
-
