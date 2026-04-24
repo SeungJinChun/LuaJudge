@@ -258,6 +258,34 @@ def build_embed(title: str, description: str, color: discord.Color) -> discord.E
     return embed
 
 
+async def safe_send_interaction(
+    interaction: discord.Interaction,
+    *,
+    content: str | None = None,
+    embed: discord.Embed | None = None,
+    view: discord.ui.View | None = None,
+    ephemeral: bool = False,
+):
+    try:
+        if interaction.response.is_done():
+            return await interaction.followup.send(
+                content=content,
+                embed=embed,
+                view=view,
+                ephemeral=ephemeral,
+            )
+        return await interaction.response.send_message(
+            content=content,
+            embed=embed,
+            view=view,
+            ephemeral=ephemeral,
+        )
+    except discord.NotFound:
+        command_name = interaction.command.name if interaction.command else "unknown"
+        print(f"Interaction expired before response could be sent: {command_name}")
+        return None
+
+
 def format_problem_meta(problem: dict) -> str:
     return f"{problem['score']}점 · {problem['difficulty']}"
 
@@ -730,7 +758,7 @@ async def problems_command(
     난이도: discord.app_commands.Choice[str] | None = None,
 ):
     try:
-        await interaction.response.defer()
+        await interaction.response.defer(thinking=True)
         problems = await asyncio.to_thread(api_get_problems)
         selected_difficulty = None if 난이도 is None or 난이도.value == "전체문제" else 난이도.value
         filtered_problems = filter_problems_by_difficulty(problems, selected_difficulty)
@@ -738,20 +766,23 @@ async def problems_command(
         if not filtered_problems:
             label = "해당 난이도의 문제가 없습니다." if selected_difficulty else "아직 등록된 문제가 없습니다."
             title = "문제 목록" if selected_difficulty is None else f"{selected_difficulty} 문제 목록"
-            await interaction.followup.send(
+            await safe_send_interaction(
+                interaction,
                 embed=build_embed(title, label, COLOR_DANGER),
                 ephemeral=False,
             )
             return
 
         if not problems:
-            await interaction.followup.send(
+            await safe_send_interaction(
+                interaction,
                 embed=build_embed("문제 목록", "아직 등록된 문제가 없습니다.", COLOR_DANGER),
                 ephemeral=False,
             )
             return
 
-        await interaction.followup.send(
+        await safe_send_interaction(
+            interaction,
             embed=build_problem_list_embed(problems, selected_difficulty),
             view=ProblemListView(filtered_problems),
             ephemeral=False,
@@ -762,9 +793,19 @@ async def problems_command(
         except Exception:
             detail = e.response.text
 
-        await interaction.followup.send(f"문제 목록 조회 실패: {detail}", ephemeral=True)
+        await safe_send_interaction(
+            interaction,
+            content=f"문제 목록 조회 실패: {detail}",
+            ephemeral=True,
+        )
+    except discord.NotFound:
+        print("Problem command interaction expired before defer completed")
     except Exception as e:
-        await interaction.followup.send(f"오류 발생: {e}", ephemeral=True)
+        await safe_send_interaction(
+            interaction,
+            content=f"오류 발생: {e}",
+            ephemeral=True,
+        )
 
 
 @bot.tree.command(name="점수", description="내 점수를 확인합니다.")
