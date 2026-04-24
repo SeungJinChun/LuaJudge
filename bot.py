@@ -286,6 +286,21 @@ async def safe_send_interaction(
         return None
 
 
+async def safe_defer_interaction(
+    interaction: discord.Interaction,
+    *,
+    ephemeral: bool = False,
+    thinking: bool = False,
+) -> bool:
+    try:
+        await interaction.response.defer(ephemeral=ephemeral, thinking=thinking)
+        return True
+    except discord.NotFound:
+        command_name = interaction.command.name if interaction.command else "unknown"
+        print(f"Interaction expired before defer could be sent: {command_name}")
+        return False
+
+
 def format_problem_meta(problem: dict) -> str:
     return f"{problem['score']}점 · {problem['difficulty']}"
 
@@ -564,19 +579,21 @@ class SubmitModal(discord.ui.Modal, title="Lua 코드 제출"):
 
     async def on_submit(self, interaction: discord.Interaction):
         try:
-            await interaction.response.defer()
+            if not await safe_defer_interaction(interaction, thinking=True):
+                return
             result = await asyncio.to_thread(
                 api_submit,
                 self.problem_id,
                 str(self.source_code),
                 interaction.user.id,
             )
-            await interaction.followup.send(
+            await safe_send_interaction(
+                interaction,
                 embed=build_public_submit_embed(
                     interaction.user.display_name,
                     self.problem_title,
                     result,
-                )
+                ),
             )
 
             if result["status"] == "ACCEPTED":
@@ -595,9 +612,9 @@ class SubmitModal(discord.ui.Modal, title="Lua 코드 제출"):
             except Exception:
                 detail = e.response.text
 
-            await interaction.followup.send(f"제출 실패: {detail}", ephemeral=True)
+            await safe_send_interaction(interaction, content=f"제출 실패: {detail}", ephemeral=True)
         except Exception as e:
-            await interaction.followup.send(f"오류 발생: {e}", ephemeral=True)
+            await safe_send_interaction(interaction, content=f"오류 발생: {e}", ephemeral=True)
 
 
 class ProblemFormModal(discord.ui.Modal):
@@ -636,7 +653,8 @@ class ProblemFormModal(discord.ui.Modal):
             return
 
         try:
-            await interaction.response.defer(ephemeral=False)
+            if not await safe_defer_interaction(interaction):
+                return
             problem_data = {
                 "title": str(self.title_input).strip(),
                 "description": str(self.description_input).strip(),
@@ -655,12 +673,13 @@ class ProblemFormModal(discord.ui.Modal):
                 )
                 action = "수정"
 
-            await interaction.followup.send(
+            await safe_send_interaction(
+                interaction,
                 embed=build_problem_saved_embed(saved_problem, action),
                 ephemeral=False,
             )
         except ValueError as e:
-            await interaction.followup.send(f"입력 형식 오류: {e}", ephemeral=True)
+            await safe_send_interaction(interaction, content=f"입력 형식 오류: {e}", ephemeral=True)
         except requests.HTTPError as e:
             try:
                 detail = e.response.json()
@@ -668,9 +687,9 @@ class ProblemFormModal(discord.ui.Modal):
                 detail = e.response.text
 
             label = "문제 추가 실패" if self.mode == "create" else "문제 수정 실패"
-            await interaction.followup.send(f"{label}: {detail}", ephemeral=True)
+            await safe_send_interaction(interaction, content=f"{label}: {detail}", ephemeral=True)
         except Exception as e:
-            await interaction.followup.send(f"오류 발생: {e}", ephemeral=True)
+            await safe_send_interaction(interaction, content=f"오류 발생: {e}", ephemeral=True)
 
 
 class ProblemDetailView(discord.ui.View):
@@ -718,7 +737,8 @@ class ProblemSelect(discord.ui.Select):
     async def callback(self, interaction: discord.Interaction):
         try:
             problem_id = int(self.values[0])
-            await interaction.response.defer()
+            if not await safe_defer_interaction(interaction, thinking=True):
+                return
             problem = await asyncio.to_thread(api_get_problem, problem_id)
             await interaction.edit_original_response(
                 embed=build_problem_detail_embed(problem),
@@ -730,9 +750,9 @@ class ProblemSelect(discord.ui.Select):
             except Exception:
                 detail = e.response.text
 
-            await interaction.followup.send(f"문제 조회 실패: {detail}", ephemeral=True)
+            await safe_send_interaction(interaction, content=f"문제 조회 실패: {detail}", ephemeral=True)
         except Exception as e:
-            await interaction.followup.send(f"오류 발생: {e}", ephemeral=True)
+            await safe_send_interaction(interaction, content=f"오류 발생: {e}", ephemeral=True)
 
 
 class ProblemListView(discord.ui.View):
@@ -758,7 +778,8 @@ async def problems_command(
     난이도: discord.app_commands.Choice[str] | None = None,
 ):
     try:
-        await interaction.response.defer(thinking=True)
+        if not await safe_defer_interaction(interaction, thinking=True):
+            return
         problems = await asyncio.to_thread(api_get_problems)
         selected_difficulty = None if 난이도 is None or 난이도.value == "전체문제" else 난이도.value
         filtered_problems = filter_problems_by_difficulty(problems, selected_difficulty)
@@ -798,8 +819,6 @@ async def problems_command(
             content=f"문제 목록 조회 실패: {detail}",
             ephemeral=True,
         )
-    except discord.NotFound:
-        print("Problem command interaction expired before defer completed")
     except Exception as e:
         await safe_send_interaction(
             interaction,
@@ -811,9 +830,11 @@ async def problems_command(
 @bot.tree.command(name="점수", description="내 점수를 확인합니다.")
 async def score_command(interaction: discord.Interaction):
     try:
-        await interaction.response.defer(ephemeral=True)
+        if not await safe_defer_interaction(interaction, ephemeral=True):
+            return
         score_info = await asyncio.to_thread(api_get_score, interaction.user.id)
-        await interaction.followup.send(
+        await safe_send_interaction(
+            interaction,
             embed=build_score_embed(interaction.user.display_name, score_info["score"]),
             ephemeral=True,
         )
@@ -823,9 +844,9 @@ async def score_command(interaction: discord.Interaction):
         except Exception:
             detail = e.response.text
 
-        await interaction.followup.send(f"점수 조회 실패: {detail}", ephemeral=True)
+        await safe_send_interaction(interaction, content=f"점수 조회 실패: {detail}", ephemeral=True)
     except Exception as e:
-        await interaction.followup.send(f"오류 발생: {e}", ephemeral=True)
+        await safe_send_interaction(interaction, content=f"오류 발생: {e}", ephemeral=True)
 
 
 @bot.tree.command(name="랭킹", description="이 서버의 점수 랭킹을 확인합니다.")
@@ -838,7 +859,8 @@ async def ranking_command(interaction: discord.Interaction):
         return
 
     try:
-        await interaction.response.defer()
+        if not await safe_defer_interaction(interaction, thinking=True):
+            return
         guild_rankings = await get_guild_rankings(interaction.guild)
 
         ranking_lines = [
@@ -855,7 +877,8 @@ async def ranking_command(interaction: discord.Interaction):
                 my_rank_text = rank_line if my_rank_text is None else f"{my_rank_text}\n{rank_line}"
                 break
 
-        await interaction.followup.send(
+        await safe_send_interaction(
+            interaction,
             embed=build_ranking_embed(interaction.guild.name, ranking_lines, my_rank_text)
         )
     except requests.HTTPError as e:
@@ -864,12 +887,9 @@ async def ranking_command(interaction: discord.Interaction):
         except Exception:
             detail = e.response.text
 
-        await interaction.followup.send(f"랭킹 조회 실패: {detail}", ephemeral=True)
+        await safe_send_interaction(interaction, content=f"랭킹 조회 실패: {detail}", ephemeral=True)
     except Exception as e:
-        if interaction.response.is_done():
-            await interaction.followup.send(f"오류 발생: {e}", ephemeral=True)
-        else:
-            await interaction.response.send_message(f"오류 발생: {e}", ephemeral=True)
+        await safe_send_interaction(interaction, content=f"오류 발생: {e}", ephemeral=True)
 
 
 @bot.tree.command(name="문제추가", description="관리자 전용 문제 추가 창을 엽니다.")
@@ -917,18 +937,19 @@ async def delete_problem_command(interaction: discord.Interaction, 문제번호:
         return
 
     try:
-        await interaction.response.defer()
+        if not await safe_defer_interaction(interaction, thinking=True):
+            return
         await asyncio.to_thread(api_delete_problem, 문제번호)
-        await interaction.followup.send(embed=build_problem_deleted_embed(문제번호))
+        await safe_send_interaction(interaction, embed=build_problem_deleted_embed(문제번호))
     except requests.HTTPError as e:
         try:
             detail = e.response.json()
         except Exception:
             detail = e.response.text
 
-        await interaction.followup.send(f"문제 삭제 실패: {detail}", ephemeral=True)
+        await safe_send_interaction(interaction, content=f"문제 삭제 실패: {detail}", ephemeral=True)
     except Exception as e:
-        await interaction.followup.send(f"오류 발생: {e}", ephemeral=True)
+        await safe_send_interaction(interaction, content=f"오류 발생: {e}", ephemeral=True)
 
 
 @bot.tree.command(name="유저데이터삭제", description="관리자 전용 사용자 데이터 삭제 명령어입니다.")
@@ -941,14 +962,16 @@ async def delete_user_data_command(interaction: discord.Interaction, 대상: dis
         return
 
     try:
-        await interaction.response.defer(ephemeral=True)
+        if not await safe_defer_interaction(interaction, ephemeral=True, thinking=True):
+            return
         await asyncio.to_thread(api_delete_user_data, 대상.id)
         if interaction.guild is not None:
             top_role = get_top_rank_role(interaction.guild)
             if top_role is not None and top_role in 대상.roles:
                 await 대상.remove_roles(top_role, reason="사용자 데이터 삭제")
             await sync_top_rank_role(interaction.guild)
-        await interaction.followup.send(
+        await safe_send_interaction(
+            interaction,
             embed=build_user_data_deleted_embed(대상),
             ephemeral=True,
         )
@@ -958,9 +981,9 @@ async def delete_user_data_command(interaction: discord.Interaction, 대상: dis
         except Exception:
             detail = e.response.text
 
-        await interaction.followup.send(f"사용자 데이터 삭제 실패: {detail}", ephemeral=True)
+        await safe_send_interaction(interaction, content=f"사용자 데이터 삭제 실패: {detail}", ephemeral=True)
     except Exception as e:
-        await interaction.followup.send(f"오류 발생: {e}", ephemeral=True)
+        await safe_send_interaction(interaction, content=f"오류 발생: {e}", ephemeral=True)
 
 
 if __name__ == "__main__":
