@@ -346,11 +346,29 @@ def sort_problems_for_user(problems: list[dict]) -> list[dict]:
     )
 
 
-def build_problem_list_embed(problems: list[dict], difficulty: str | None = None) -> discord.Embed:
-    filtered_problems = filter_problems_by_difficulty(problems, difficulty)
+def filter_problems_by_status(problems: list[dict], status_filter: str | None) -> list[dict]:
+    if status_filter == "solved":
+        return [problem for problem in problems if problem.get("solved")]
+    if status_filter == "unsolved":
+        return [problem for problem in problems if not problem.get("solved")]
+    return problems
+
+
+def build_problem_list_embed(
+    problems: list[dict],
+    difficulty: str | None = None,
+    status_filter: str | None = None,
+) -> discord.Embed:
+    filtered_problems = filter_problems_by_status(problems, status_filter)
     title = "문제 목록" if difficulty is None else f"{difficulty} 문제 목록"
     count_label = f"{len(filtered_problems)}개"
-    summary = f"전체 · {count_label}" if difficulty is None else f"{difficulty} · {count_label}"
+    status_label = {
+        None: "전체",
+        "solved": "푼 문제",
+        "unsolved": "안 푼 문제",
+    }[status_filter]
+    summary_prefix = "전체" if difficulty is None else difficulty
+    summary = f"{summary_prefix} · {status_label} · {count_label}"
     description = f"{summary}\n문제를 선택하세요."
     embed = build_embed(title, description, COLOR_PRIMARY)
 
