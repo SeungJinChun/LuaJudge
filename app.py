@@ -1,4 +1,4 @@
-from fastapi import FastAPI, HTTPException
+from fastapi import FastAPI, HTTPException, Query
 from pydantic import BaseModel, Field
 from sqlalchemy import inspect, text
 from sqlalchemy.exc import IntegrityError
@@ -175,6 +175,18 @@ def score_to_difficulty(score: int) -> str:
     return DIFFICULTY_LABELS[difficulty_index]
 
 
+def difficulty_to_score_range(difficulty: str) -> tuple[int, int | None] | None:
+    try:
+        difficulty_index = DIFFICULTY_LABELS.index(difficulty)
+    except ValueError:
+        return None
+
+    min_score = difficulty_index * 10
+    if difficulty_index == len(DIFFICULTY_LABELS) - 1:
+        return min_score, None
+    return min_score, (difficulty_index + 1) * 10
+
+
 def serialize_problem(problem: Problem, include_test_cases: bool = True) -> dict:
     data = {
         "id": problem.id,
@@ -304,12 +316,25 @@ def update_problem(problem_id: int, problem: ProblemCreate):
 
 
 @app.get("/problems")
-def get_problems():
+def get_problems(difficulty: str | None = Query(default=None)):
     db = SessionLocal()
 
     try:
-        problems = db.query(Problem).all()
-        return [serialize_problem(problem) for problem in problems]
+        query = db.query(Problem)
+        if difficulty is not None:
+            score_range = difficulty_to_score_range(difficulty)
+            if score_range is None:
+                raise HTTPException(status_code=400, detail="Invalid difficulty")
+
+            min_score, max_score = score_range
+            query = query.filter(Problem.score >= min_score)
+            if max_score is not None:
+                query = query.filter(Problem.score < max_score)
+
+        problems = query.order_by(Problem.id.asc()).all()
+        return [serialize_problem(problem, include_test_cases=False) for problem in problems]
+    except HTTPException:
+        raise
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
     finally:

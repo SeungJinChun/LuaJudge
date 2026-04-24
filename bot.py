@@ -98,8 +98,12 @@ def run_bot_with_retries():
         raise last_error
 
 
-def api_get_problems():
-    res = requests.get(f"{API_URL}/problems", timeout=10)
+def api_get_problems(difficulty: str | None = None):
+    params = {}
+    if difficulty is not None:
+        params["difficulty"] = difficulty
+
+    res = requests.get(f"{API_URL}/problems", params=params, timeout=10)
     res.raise_for_status()
     return res.json()
 
@@ -266,20 +270,18 @@ async def safe_send_interaction(
     view: discord.ui.View | None = None,
     ephemeral: bool = False,
 ):
+    kwargs = {
+        "content": content,
+        "embed": embed,
+        "ephemeral": ephemeral,
+    }
+    if view is not None:
+        kwargs["view"] = view
+
     try:
         if interaction.response.is_done():
-            return await interaction.followup.send(
-                content=content,
-                embed=embed,
-                view=view,
-                ephemeral=ephemeral,
-            )
-        return await interaction.response.send_message(
-            content=content,
-            embed=embed,
-            view=view,
-            ephemeral=ephemeral,
-        )
+            return await interaction.followup.send(**kwargs)
+        return await interaction.response.send_message(**kwargs)
     except discord.NotFound:
         command_name = interaction.command.name if interaction.command else "unknown"
         print(f"Interaction expired before response could be sent: {command_name}")
@@ -780,9 +782,9 @@ async def problems_command(
     try:
         if not await safe_defer_interaction(interaction, thinking=True):
             return
-        problems = await asyncio.to_thread(api_get_problems)
         selected_difficulty = None if 난이도 is None or 난이도.value == "전체문제" else 난이도.value
-        filtered_problems = filter_problems_by_difficulty(problems, selected_difficulty)
+        problems = await asyncio.to_thread(api_get_problems, selected_difficulty)
+        filtered_problems = problems if selected_difficulty is not None else filter_problems_by_difficulty(problems, None)
 
         if not filtered_problems:
             label = "해당 난이도의 문제가 없습니다." if selected_difficulty else "아직 등록된 문제가 없습니다."
