@@ -663,6 +663,30 @@ def get_user_score(user_id: int):
         db.close()
 
 
+@app.get("/users/{user_id}/solved-problems")
+def get_solved_problems(user_id: int):
+    db = SessionLocal()
+
+    try:
+        solved_problem_ids = [
+            problem_id
+            for (problem_id,) in (
+                db.query(SolvedProblem.problem_id)
+                .filter(SolvedProblem.discord_user_id == user_id)
+                .order_by(SolvedProblem.problem_id.asc())
+                .all()
+            )
+        ]
+        return {
+            "user_id": user_id,
+            "problem_ids": solved_problem_ids,
+        }
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+    finally:
+        db.close()
+
+
 @app.delete("/users/{user_id}")
 def delete_user_data(user_id: int):
     db = SessionLocal()

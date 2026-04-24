@@ -120,6 +120,12 @@ def api_get_score(user_id: int):
     return res.json()
 
 
+def api_get_solved_problems(user_id: int):
+    res = requests.get(f"{API_URL}/users/{user_id}/solved-problems", timeout=10)
+    res.raise_for_status()
+    return res.json()
+
+
 def api_get_rankings():
     res = requests.get(f"{API_URL}/rankings", timeout=10)
     res.raise_for_status()
@@ -328,39 +334,25 @@ def filter_problems_by_difficulty(problems: list[dict], difficulty: str | None) 
     return [problem for problem in sort_problems_by_difficulty(problems) if problem["difficulty"] == difficulty]
 
 
+def sort_problems_for_user(problems: list[dict]) -> list[dict]:
+    return sorted(
+        problems,
+        key=lambda problem: (
+            problem.get("solved", False),
+            DIFFICULTY_ORDER.index(problem["difficulty"]) if problem.get("difficulty") in DIFFICULTY_ORDER else len(DIFFICULTY_ORDER),
+            problem["score"],
+            problem["id"],
+        ),
+    )
+
+
 def build_problem_list_embed(problems: list[dict], difficulty: str | None = None) -> discord.Embed:
     filtered_problems = filter_problems_by_difficulty(problems, difficulty)
     title = "문제 목록" if difficulty is None else f"{difficulty} 문제 목록"
-    intro = (
-        "난이도를 선택하지 않아 전체 문제를 보여주고 있습니다.\n"
-        "원하면 `/문제` 명령에서 난이도를 함께 선택해 더 좁혀볼 수 있습니다."
-        if difficulty is None
-        else f"`{difficulty}` 난이도 문제만 보여주고 있습니다."
-    )
-    description = (
-        f"{intro}\n"
-        "드롭다운에서 문제를 고르면 상세 설명과 제출 버튼이 열립니다.\n"
-        f"현재 표시 중인 문제: **{len(filtered_problems)}개**"
-    )
+    count_label = f"{len(filtered_problems)}개"
+    summary = f"전체 · {count_label}" if difficulty is None else f"{difficulty} · {count_label}"
+    description = f"{summary}\n문제를 선택하세요."
     embed = build_embed(title, description, COLOR_PRIMARY)
-
-    for difficulty_name in DIFFICULTY_ORDER:
-        group = [problem for problem in filtered_problems if problem["difficulty"] == difficulty_name]
-        if not group:
-            continue
-
-        lines = [
-            f"`#{problem['id']}` {problem['title']} ({problem['score']}점)"
-            for problem in group[:8]
-        ]
-        if len(group) > 8:
-            lines.append(f"... 외 {len(group) - 8}개")
-
-        embed.add_field(
-            name=f"{difficulty_name} · {len(group)}개",
-            value="\n".join(lines),
-            inline=False,
-        )
 
     if len(filtered_problems) > 25:
         embed.add_field(
@@ -721,9 +713,10 @@ class ProblemSelect(discord.ui.Select):
         options = []
 
         for problem in problems[:25]:
+            solved_marker = "🟢 " if problem.get("solved") else ""
             options.append(
                 discord.SelectOption(
-                    label=f"{problem['id']}. {problem['title']}",
+                    label=f"{solved_marker}{problem['id']}. {problem['title']}",
                     value=str(problem["id"]),
                     description=f"{format_problem_meta(problem)} · {shorten(problem['description'], 70)}",
                 )
@@ -783,8 +776,16 @@ async def problems_command(
         if not await safe_defer_interaction(interaction, thinking=True):
             return
         selected_difficulty = None if 난이도 is None or 난이도.value == "전체문제" else 난이도.value
-        problems = await asyncio.to_thread(api_get_problems, selected_difficulty)
+        problems, solved_info = await asyncio.gather(
+            asyncio.to_thread(api_get_problems, selected_difficulty),
+            asyncio.to_thread(api_get_solved_problems, interaction.user.id),
+        )
+        solved_problem_ids = set(solved_info.get("problem_ids", []))
+        for problem in problems:
+            problem["solved"] = problem["id"] in solved_problem_ids
+
         filtered_problems = problems if selected_difficulty is not None else filter_problems_by_difficulty(problems, None)
+        filtered_problems = sort_problems_for_user(filtered_problems)
 
         if not filtered_problems:
             label = "해당 난이도의 문제가 없습니다." if selected_difficulty else "아직 등록된 문제가 없습니다."
@@ -806,7 +807,7 @@ async def problems_command(
 
         await safe_send_interaction(
             interaction,
-            embed=build_problem_list_embed(problems, selected_difficulty),
+            embed=build_problem_list_embed(filtered_problems, selected_difficulty),
             view=ProblemListView(filtered_problems),
             ephemeral=False,
         )
