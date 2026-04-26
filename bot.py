@@ -5,7 +5,7 @@ import threading
 import time
 
 import discord
-from discord.ext import commands
+from discord.ext import commands, tasks
 import requests
 from dotenv import load_dotenv
 import uvicorn
@@ -624,6 +624,16 @@ intents.members = True
 bot = commands.Bot(command_prefix="!", intents=intents)
 
 
+
+@tasks.loop(minutes=1)
+async def auto_rank_sync():
+    for guild in bot.guilds:
+        try:
+            await sync_top_rank_role(guild)
+        except Exception as e:
+            print(f"Auto rank sync failed: {e}")
+
+
 @bot.event
 async def on_ready():
     synced = await bot.tree.sync()
@@ -634,6 +644,7 @@ async def on_ready():
             print(f"Top rank role sync failed in guild {guild.id}: {exc}")
     print(f"{bot.user} 로그인 완료")
     print("슬래시 명령어 동기화 완료")
+    auto_rank_sync.start()
     print("동기화된 명령어:", [command.name for command in synced])
 
 
