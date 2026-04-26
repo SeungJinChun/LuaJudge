@@ -471,41 +471,6 @@ def build_ranking_embed(guild_name: str, ranking_lines: list[str], my_rank_text:
         COLOR_PRIMARY,
     )
 
-def calculate_competition_ranks(
-    guild_rankings: list[tuple[discord.Member, int, int]]
-) -> list[tuple[int, discord.Member, int, int]]:
-    ranked_items: list[tuple[int, discord.Member, int, int]] = []
-    previous_score: int | None = None
-    current_rank = 0
-
-    for index, (member, score, user_id) in enumerate(guild_rankings, start=1):
-        if score != previous_score:
-            current_rank = index
-            previous_score = score
-
-        ranked_items.append((current_rank, member, score, user_id))
-
-    return ranked_items
-
-
-def build_ranking_lines(guild_rankings: list[tuple[discord.Member, int, int]]) -> list[str]:
-    return [
-        f"**{rank}등.** {member.display_name} - **{score}점**"
-        for rank, member, score, _ in calculate_competition_ranks(guild_rankings[:10])
-    ]
-
-
-def find_user_rank_text(
-    guild_rankings: list[tuple[discord.Member, int, int]],
-    user_id: int,
-) -> str | None:
-    for rank, _, score, ranked_user_id in calculate_competition_ranks(guild_rankings):
-        if ranked_user_id == user_id:
-            return f"내 순위: **{rank}등.** · **{score}점**"
-
-    return None
-
-
 
 def build_problem_saved_embed(problem: dict, action: str) -> discord.Embed:
     return build_embed(
@@ -808,6 +773,45 @@ class ProblemListView(discord.ui.View):
         super().__init__(timeout=300)
         self.add_item(ProblemSelect(problems))
 
+def get_rank_emoji(rank: int) -> str:
+    if rank == 1:
+        return "🥇"
+    if rank == 2:
+        return "🥈"
+    if rank == 3:
+        return "🥉"
+    return "🏅"
+
+
+def build_dense_rank_map(guild_rankings: list[tuple[discord.Member, int, int]]) -> dict[int, int]:
+    rank_by_user_id: dict[int, int] = {}
+    previous_score = None
+    current_rank = 0
+
+    for _, score, user_id in guild_rankings:
+        if score != previous_score:
+            current_rank += 1
+            previous_score = score
+        rank_by_user_id[user_id] = current_rank
+
+    return rank_by_user_id
+
+
+def build_ranking_lines(guild_rankings: list[tuple[discord.Member, int, int]], limit: int = 10) -> list[str]:
+    lines = []
+    previous_score = None
+    current_rank = 0
+
+    for member, score, _ in guild_rankings[:limit]:
+        if score != previous_score:
+            current_rank += 1
+            previous_score = score
+
+        emoji = get_rank_emoji(current_rank)
+        lines.append(f"{emoji} **{current_rank}등.** {member.display_name} - **{score}점**")
+
+    return lines
+
 
 @bot.tree.command(name="문제", description="문제 목록을 보여줍니다.")
 @discord.app_commands.describe(난이도="특정 난이도만 보고 싶으면 선택하세요.")
@@ -923,9 +927,14 @@ async def ranking_command(interaction: discord.Interaction):
 
         top_role = get_top_rank_role(interaction.guild)
         my_rank_text = f"1등 역할: **{top_role.name}**" if top_role is not None else None
-        rank_line = find_user_rank_text(guild_rankings, interaction.user.id)
-        if rank_line is not None:
-            my_rank_text = rank_line if my_rank_text is None else f"{my_rank_text}\n{rank_line}"
+        rank_by_user_id = build_dense_rank_map(guild_rankings)
+
+        for _, score, user_id in guild_rankings:
+            if user_id == interaction.user.id:
+                my_rank = rank_by_user_id[user_id]
+                rank_line = f"내 순위: {get_rank_emoji(my_rank)} **{my_rank}등.** · **{score}점**"
+                my_rank_text = rank_line if my_rank_text is None else f"{my_rank_text}\n{rank_line}"
+                break
 
         await safe_send_interaction(
             interaction,
