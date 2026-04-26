@@ -990,13 +990,6 @@ async def ranking_command(interaction: discord.Interaction):
         second_role = get_second_rank_role(interaction.guild)
         role_lines = []
 
-        if top_role is not None:
-            role_lines.append(f"1등 역할: **{top_role.name}**")
-        if second_role is not None:
-            role_lines.append(f"2등 역할: **{second_role.name}**")
-        if user_rank_text is not None:
-            role_lines.append(user_rank_text)
-
         my_rank_text = "\n".join(role_lines) if role_lines else None
 
         await safe_send_interaction(
