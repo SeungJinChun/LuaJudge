@@ -187,10 +187,12 @@ async def sync_top_rank_role(guild: discord.Guild):
         return
 
     guild_rankings = await get_guild_rankings(guild)
+    guild_rankings = sort_rankings(guild_rankings)
+
     if not guild_rankings:
         top_members: set[int] = set()
     else:
-        top_score = guild_rankings[0][1]
+        top_score = max(score for _, score, _ in guild_rankings)
         top_members = {user_id for _, score, user_id in guild_rankings if score == top_score}
 
     print(
@@ -451,6 +453,40 @@ def build_score_embed(user_name: str, score: int) -> discord.Embed:
         f"현재 점수는 **{score}점**입니다.",
         COLOR_PRIMARY,
     )
+
+
+def sort_rankings(rankings: list[tuple[discord.Member, int, int]]) -> list[tuple[discord.Member, int, int]]:
+    return sorted(rankings, key=lambda item: (-item[1], item[2]))
+
+
+def get_competition_ranks(rankings: list[tuple[discord.Member, int, int]]) -> list[tuple[int, discord.Member, int, int]]:
+    ranked_items = []
+    previous_score = None
+    current_rank = 0
+
+    for index, (member, score, user_id) in enumerate(sort_rankings(rankings), start=1):
+        if score != previous_score:
+            current_rank = index
+            previous_score = score
+
+        ranked_items.append((current_rank, member, score, user_id))
+
+    return ranked_items
+
+
+def build_ranking_lines(rankings: list[tuple[discord.Member, int, int]], limit: int = 10) -> list[str]:
+    return [
+        f"**{rank}.** {member.display_name} - **{score}점**"
+        for rank, member, score, _ in get_competition_ranks(rankings)[:limit]
+    ]
+
+
+def get_user_rank_text(rankings: list[tuple[discord.Member, int, int]], user_id: int) -> str | None:
+    for rank, _, score, ranked_user_id in get_competition_ranks(rankings):
+        if ranked_user_id == user_id:
+            return f"내 순위: **{rank}위** · **{score}점**"
+
+    return None
 
 
 def build_ranking_embed(guild_name: str, ranking_lines: list[str], my_rank_text: str | None) -> discord.Embed:
@@ -882,21 +918,16 @@ async def ranking_command(interaction: discord.Interaction):
     try:
         if not await safe_defer_interaction(interaction, thinking=True):
             return
-        guild_rankings = await get_guild_rankings(interaction.guild)
+        guild_rankings = sort_rankings(await get_guild_rankings(interaction.guild))
 
-        ranking_lines = [
-            f"**{index}.** {name} - **{score}점**"
-            for index, (member, score, _) in enumerate(guild_rankings[:10], start=1)
-            for name in [member.display_name]
-        ]
+        ranking_lines = build_ranking_lines(guild_rankings)
 
         top_role = get_top_rank_role(interaction.guild)
         my_rank_text = f"1등 역할: **{top_role.name}**" if top_role is not None else None
-        for index, (_, score, user_id) in enumerate(guild_rankings, start=1):
-            if user_id == interaction.user.id:
-                rank_line = f"내 순위: **{index}위** · **{score}점**"
-                my_rank_text = rank_line if my_rank_text is None else f"{my_rank_text}\n{rank_line}"
-                break
+
+        rank_line = get_user_rank_text(guild_rankings, interaction.user.id)
+        if rank_line is not None:
+            my_rank_text = rank_line if my_rank_text is None else f"{my_rank_text}\n{rank_line}"
 
         await safe_send_interaction(
             interaction,
