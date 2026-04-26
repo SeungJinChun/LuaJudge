@@ -22,6 +22,8 @@ BOT_LOGIN_RETRY_DELAY = int(os.getenv("BOT_LOGIN_RETRY_DELAY", "30"))
 API_STARTUP_TIMEOUT = int(os.getenv("API_STARTUP_TIMEOUT", "60"))
 TOP_RANK_ROLE_ID = os.getenv("TOP_RANK_ROLE_ID")
 TOP_RANK_ROLE_NAME = os.getenv("TOP_RANK_ROLE_NAME", "랭킹 1등")
+SECOND_RANK_ROLE_ID = os.getenv("SECOND_RANK_ROLE_ID")
+SECOND_RANK_ROLE_NAME = os.getenv("SECOND_RANK_ROLE_NAME", "랭킹 2등")
 
 ADMIN_USER_IDS = {
     int(user_id.strip())
@@ -132,17 +134,37 @@ def api_get_rankings():
     return res.json()
 
 
-def get_top_rank_role(guild: discord.Guild) -> discord.Role | None:
-    if TOP_RANK_ROLE_ID:
-        role = guild.get_role(int(TOP_RANK_ROLE_ID))
+def get_rank_role(
+    guild: discord.Guild,
+    role_id: str | None,
+    role_name: str,
+) -> discord.Role | None:
+    if role_id:
+        try:
+            role = guild.get_role(int(role_id))
+        except ValueError:
+            role = None
         if role is not None:
             return role
 
-    return discord.utils.get(guild.roles, name=TOP_RANK_ROLE_NAME)
+    return discord.utils.get(guild.roles, name=role_name)
 
 
-async def ensure_top_rank_role(guild: discord.Guild) -> discord.Role | None:
-    role = get_top_rank_role(guild)
+def get_top_rank_role(guild: discord.Guild) -> discord.Role | None:
+    return get_rank_role(guild, TOP_RANK_ROLE_ID, TOP_RANK_ROLE_NAME)
+
+
+def get_second_rank_role(guild: discord.Guild) -> discord.Role | None:
+    return get_rank_role(guild, SECOND_RANK_ROLE_ID, SECOND_RANK_ROLE_NAME)
+
+
+async def ensure_rank_role(
+    guild: discord.Guild,
+    role_id: str | None,
+    role_name: str,
+    reason: str,
+) -> discord.Role | None:
+    role = get_rank_role(guild, role_id, role_name)
     if role is not None:
         return role
 
@@ -150,9 +172,24 @@ async def ensure_top_rank_role(guild: discord.Guild) -> discord.Role | None:
     if me is None or not me.guild_permissions.manage_roles:
         return None
 
-    return await guild.create_role(
-        name=TOP_RANK_ROLE_NAME,
-        reason="랭킹 1등 역할 자동 생성",
+    return await guild.create_role(name=role_name, reason=reason)
+
+
+async def ensure_top_rank_role(guild: discord.Guild) -> discord.Role | None:
+    return await ensure_rank_role(
+        guild,
+        TOP_RANK_ROLE_ID,
+        TOP_RANK_ROLE_NAME,
+        "랭킹 1등 역할 자동 생성",
+    )
+
+
+async def ensure_second_rank_role(guild: discord.Guild) -> discord.Role | None:
+    return await ensure_rank_role(
+        guild,
+        SECOND_RANK_ROLE_ID,
+        SECOND_RANK_ROLE_NAME,
+        "랭킹 2등 역할 자동 생성",
     )
 
 
@@ -171,52 +208,91 @@ async def get_guild_rankings(guild: discord.Guild) -> list[tuple[discord.Member,
     return guild_rankings
 
 
-async def sync_top_rank_role(guild: discord.Guild):
-    role = await ensure_top_rank_role(guild)
-    if role is None:
-        print(f"Top rank role sync skipped in guild {guild.id}: role not found or cannot be created")
-        return
+def get_dense_rank_groups(
+    guild_rankings: list[tuple[discord.Member, int, int]],
+    max_rank: int = 2,
+) -> dict[int, set[int]]:
+    rank_groups: dict[int, set[int]] = {rank: set() for rank in range(1, max_rank + 1)}
+    previous_score: int | None = None
+    current_rank = 0
 
+    for _, score, user_id in guild_rankings:
+        if score != previous_score:
+            current_rank += 1
+            previous_score = score
+
+        if current_rank > max_rank:
+            break
+
+        rank_groups[current_rank].add(user_id)
+
+    return rank_groups
+
+
+async def sync_role_members(
+    guild: discord.Guild,
+    role: discord.Role,
+    target_member_ids: set[int],
+    rank_label: str,
+):
     me = guild.me
     if me is None or not me.guild_permissions.manage_roles or role >= me.top_role:
         print(
-            f"Top rank role sync skipped in guild {guild.id}: "
+            f"{rank_label} role sync skipped in guild {guild.id}: "
             f"manage_roles={None if me is None else me.guild_permissions.manage_roles}, "
             f"role_position_ok={False if me is None else role < me.top_role}"
         )
         return
 
-    guild_rankings = await get_guild_rankings(guild)
-    if not guild_rankings:
-        top_members: set[int] = set()
-    else:
-        top_score = guild_rankings[0][1]
-        top_members = {user_id for _, score, user_id in guild_rankings if score == top_score}
+    current_member_ids = {member.id for member in role.members}
 
     print(
-        f"Top rank role sync in guild {guild.id}: "
-        f"role={role.name}, top_members={sorted(top_members)}, current_members={[member.id for member in role.members]}"
+        f"{rank_label} role sync in guild {guild.id}: "
+        f"role={role.name}, target_members={sorted(target_member_ids)}, "
+        f"current_members={sorted(current_member_ids)}"
     )
 
-    current_members = {member.id for member in role.members}
-
-    for member_id in current_members - top_members:
+    for member_id in current_member_ids - target_member_ids:
         member = guild.get_member(member_id)
         if member is None:
             try:
                 member = await guild.fetch_member(member_id)
             except (discord.NotFound, discord.Forbidden, discord.HTTPException):
-                print(f"Top rank role removal skipped in guild {guild.id}: member {member_id} fetch failed")
+                print(f"{rank_label} role removal skipped in guild {guild.id}: member {member_id} fetch failed")
                 continue
-        await member.remove_roles(role, reason="랭킹 1등 변경")
-        print(f"Top rank role removed in guild {guild.id}: user_id={member.id}")
 
-    for member, _, user_id in guild_rankings:
-        if user_id not in top_members or role in member.roles:
-            continue
-        await member.add_roles(role, reason="랭킹 1등 부여")
-        print(f"Top rank role added in guild {guild.id}: user_id={member.id}")
+        await member.remove_roles(role, reason=f"랭킹 {rank_label} 변경")
+        print(f"{rank_label} role removed in guild {guild.id}: user_id={member.id}")
 
+    for member_id in target_member_ids - current_member_ids:
+        member = guild.get_member(member_id)
+        if member is None:
+            try:
+                member = await guild.fetch_member(member_id)
+            except (discord.NotFound, discord.Forbidden, discord.HTTPException):
+                print(f"{rank_label} role add skipped in guild {guild.id}: member {member_id} fetch failed")
+                continue
+
+        await member.add_roles(role, reason=f"랭킹 {rank_label} 부여")
+        print(f"{rank_label} role added in guild {guild.id}: user_id={member.id}")
+
+
+async def sync_top_rank_role(guild: discord.Guild):
+    top_role = await ensure_top_rank_role(guild)
+    second_role = await ensure_second_rank_role(guild)
+
+    if top_role is None:
+        print(f"1등 role sync skipped in guild {guild.id}: role not found or cannot be created")
+    if second_role is None:
+        print(f"2등 role sync skipped in guild {guild.id}: role not found or cannot be created")
+
+    guild_rankings = await get_guild_rankings(guild)
+    rank_groups = get_dense_rank_groups(guild_rankings, max_rank=2)
+
+    if top_role is not None:
+        await sync_role_members(guild, top_role, rank_groups[1], "1등")
+    if second_role is not None:
+        await sync_role_members(guild, second_role, rank_groups[2], "2등")
 
 def api_submit(problem_id: int, source_code: str, user_id: int):
     res = requests.post(
@@ -773,45 +849,6 @@ class ProblemListView(discord.ui.View):
         super().__init__(timeout=300)
         self.add_item(ProblemSelect(problems))
 
-def get_rank_emoji(rank: int) -> str:
-    if rank == 1:
-        return "🥇"
-    if rank == 2:
-        return "🥈"
-    if rank == 3:
-        return "🥉"
-    return "🏅"
-
-
-def build_dense_rank_map(guild_rankings: list[tuple[discord.Member, int, int]]) -> dict[int, int]:
-    rank_by_user_id: dict[int, int] = {}
-    previous_score = None
-    current_rank = 0
-
-    for _, score, user_id in guild_rankings:
-        if score != previous_score:
-            current_rank += 1
-            previous_score = score
-        rank_by_user_id[user_id] = current_rank
-
-    return rank_by_user_id
-
-
-def build_ranking_lines(guild_rankings: list[tuple[discord.Member, int, int]], limit: int = 10) -> list[str]:
-    lines = []
-    previous_score = None
-    current_rank = 0
-
-    for member, score, _ in guild_rankings[:limit]:
-        if score != previous_score:
-            current_rank += 1
-            previous_score = score
-
-        emoji = get_rank_emoji(current_rank)
-        lines.append(f"{emoji} **{current_rank}등.** {member.display_name} - **{score}점**")
-
-    return lines
-
 
 @bot.tree.command(name="문제", description="문제 목록을 보여줍니다.")
 @discord.app_commands.describe(난이도="특정 난이도만 보고 싶으면 선택하세요.")
@@ -923,18 +960,44 @@ async def ranking_command(interaction: discord.Interaction):
             return
         guild_rankings = await get_guild_rankings(interaction.guild)
 
-        ranking_lines = build_ranking_lines(guild_rankings)
+        rank_emojis = {
+            1: "🥇",
+            2: "🥈",
+            3: "🥉",
+        }
+
+        ranking_lines = []
+        previous_score = None
+        current_rank = 0
+        user_rank_text = None
+
+        for member, score, user_id in guild_rankings:
+            if score != previous_score:
+                current_rank += 1
+                previous_score = score
+
+            emoji = rank_emojis.get(current_rank, "🏅")
+
+            if len(ranking_lines) < 10:
+                ranking_lines.append(
+                    f"{emoji} **{current_rank}등.** {member.display_name} - **{score}점**"
+                )
+
+            if user_id == interaction.user.id:
+                user_rank_text = f"내 순위: {emoji} **{current_rank}등** · **{score}점**"
 
         top_role = get_top_rank_role(interaction.guild)
-        my_rank_text = f"1등 역할: **{top_role.name}**" if top_role is not None else None
-        rank_by_user_id = build_dense_rank_map(guild_rankings)
+        second_role = get_second_rank_role(interaction.guild)
+        role_lines = []
 
-        for _, score, user_id in guild_rankings:
-            if user_id == interaction.user.id:
-                my_rank = rank_by_user_id[user_id]
-                rank_line = f"내 순위: {get_rank_emoji(my_rank)} **{my_rank}등.** · **{score}점**"
-                my_rank_text = rank_line if my_rank_text is None else f"{my_rank_text}\n{rank_line}"
-                break
+        if top_role is not None:
+            role_lines.append(f"1등 역할: **{top_role.name}**")
+        if second_role is not None:
+            role_lines.append(f"2등 역할: **{second_role.name}**")
+        if user_rank_text is not None:
+            role_lines.append(user_rank_text)
+
+        my_rank_text = "\n".join(role_lines) if role_lines else None
 
         await safe_send_interaction(
             interaction,
@@ -1026,8 +1089,11 @@ async def delete_user_data_command(interaction: discord.Interaction, 대상: dis
         await asyncio.to_thread(api_delete_user_data, 대상.id)
         if interaction.guild is not None:
             top_role = get_top_rank_role(interaction.guild)
+            second_role = get_second_rank_role(interaction.guild)
             if top_role is not None and top_role in 대상.roles:
                 await 대상.remove_roles(top_role, reason="사용자 데이터 삭제")
+            if second_role is not None and second_role in 대상.roles:
+                await 대상.remove_roles(second_role, reason="사용자 데이터 삭제")
             await sync_top_rank_role(interaction.guild)
         await safe_send_interaction(
             interaction,
