@@ -836,7 +836,6 @@ class ProblemSelect(discord.ui.Select):
             await interaction.edit_original_response(
                 embed=build_problem_detail_embed(problem),
                 view=ProblemDetailView(problem["id"], problem["title"], self.problems),
-                ephemeral=True,
             )
         except requests.HTTPError as e:
             try:
@@ -908,7 +907,7 @@ async def problems_command(
             interaction,
             embed=build_problem_list_embed(filtered_problems, selected_difficulty),
             view=ProblemListView(filtered_problems),
-            ephemeral=False,
+            ephemeral=True,
         )
     except requests.HTTPError as e:
         try:
