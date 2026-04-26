@@ -436,16 +436,16 @@ def build_problem_list_embed(
     status_filter: str | None = None,
 ) -> discord.Embed:
     filtered_problems = filter_problems_by_status(problems, status_filter)
-    title = "문제 목록" if difficulty is None else f"{difficulty} 문제 목록"
+    title = "문제 목록"
     count_label = f"{len(filtered_problems)}개"
-    status_label = {
-        None: "전체",
-        "solved": "푼 문제",
-        "unsolved": "안 푼 문제",
-    }[status_filter]
-    summary_prefix = "전체" if difficulty is None else difficulty
-    summary = f"{summary_prefix} · {status_label} · {count_label}"
-    description = f"{summary}\n문제를 선택하세요."
+    difficulty_label = "전체" if difficulty is None else difficulty
+
+    if status_filter == "solved":
+        summary = f"{difficulty_label} · 푼 문제 · {count_label}"
+    else:
+        summary = f"{difficulty_label} · {count_label}"
+
+    description = f"문제를 선택하세요\n{summary}"
     embed = build_embed(title, description, COLOR_PRIMARY)
 
     if len(filtered_problems) > 25:
@@ -781,11 +781,20 @@ class ProblemFormModal(discord.ui.Modal):
 
 
 class ProblemDetailView(discord.ui.View):
-    def __init__(self, problem_id: int, problem_title: str, problems: list[dict]):
+    def __init__(
+        self,
+        problem_id: int,
+        problem_title: str,
+        problems: list[dict],
+        difficulty: str | None = None,
+        status_filter: str | None = None,
+    ):
         super().__init__(timeout=300)
         self.problem_id = problem_id
         self.problem_title = problem_title
         self.problems = problems
+        self.difficulty = difficulty
+        self.status_filter = status_filter
 
     @discord.ui.button(label="코드 제출", style=discord.ButtonStyle.success)
     async def submit_button(self, interaction: discord.Interaction, button: discord.ui.Button):
@@ -796,23 +805,31 @@ class ProblemDetailView(discord.ui.View):
     @discord.ui.button(label="목록으로 돌아가기", style=discord.ButtonStyle.secondary)
     async def back_button(self, interaction: discord.Interaction, button: discord.ui.Button):
         await interaction.response.edit_message(
-            embed=build_problem_list_embed(self.problems),
-            view=ProblemListView(self.problems),
+            embed=build_problem_list_embed(self.problems, self.difficulty, self.status_filter),
+            view=ProblemListView(self.problems, self.difficulty, self.status_filter),
         )
 
 
 class ProblemSelect(discord.ui.Select):
-    def __init__(self, problems: list[dict]):
+    def __init__(
+        self,
+        problems: list[dict],
+        all_problems: list[dict],
+        difficulty: str | None = None,
+        status_filter: str | None = None,
+    ):
         self.problems = problems
+        self.all_problems = all_problems
+        self.difficulty = difficulty
+        self.status_filter = status_filter
         options = []
 
         for problem in problems[:25]:
-            solved_marker = "🟢 " if problem.get("solved") else ""
+            solved_marker = "🟢 " if problem.get("solved") else "🔴 "
             options.append(
                 discord.SelectOption(
-                    label=f"{solved_marker}{problem['id']}. {problem['title']}",
+                    label=f"{solved_marker}{problem['title']}",
                     value=str(problem["id"]),
-                    description=f"{format_problem_meta(problem)} · {shorten(problem['description'], 70)}",
                 )
             )
 
@@ -831,7 +848,13 @@ class ProblemSelect(discord.ui.Select):
             problem = await asyncio.to_thread(api_get_problem, problem_id)
             await interaction.edit_original_response(
                 embed=build_problem_detail_embed(problem),
-                view=ProblemDetailView(problem["id"], problem["title"], self.problems),
+                view=ProblemDetailView(
+                    problem["id"],
+                    problem["title"],
+                    self.all_problems,
+                    self.difficulty,
+                    self.status_filter,
+                ),
             )
         except requests.HTTPError as e:
             try:
@@ -845,9 +868,52 @@ class ProblemSelect(discord.ui.Select):
 
 
 class ProblemListView(discord.ui.View):
-    def __init__(self, problems: list[dict]):
+    def __init__(
+        self,
+        problems: list[dict],
+        difficulty: str | None = None,
+        status_filter: str | None = None,
+    ):
         super().__init__(timeout=300)
-        self.add_item(ProblemSelect(problems))
+        self.problems = problems
+        self.difficulty = difficulty
+        self.status_filter = status_filter
+
+        filtered_problems = filter_problems_by_status(problems, status_filter)
+
+        if filtered_problems:
+            self.add_item(
+                ProblemSelect(
+                    filtered_problems,
+                    problems,
+                    difficulty,
+                    status_filter,
+                )
+            )
+
+        self.toggle_solved_filter.label = (
+            "전체 문제 보기" if status_filter == "solved" else "푼 문제만 보기"
+        )
+        self.toggle_solved_filter.style = (
+            discord.ButtonStyle.secondary if status_filter == "solved" else discord.ButtonStyle.success
+        )
+
+    @discord.ui.button(label="푼 문제만 보기", style=discord.ButtonStyle.success)
+    async def toggle_solved_filter(self, interaction: discord.Interaction, button: discord.ui.Button):
+        next_filter = None if self.status_filter == "solved" else "solved"
+
+        await interaction.response.edit_message(
+            embed=build_problem_list_embed(
+                self.problems,
+                self.difficulty,
+                next_filter,
+            ),
+            view=ProblemListView(
+                self.problems,
+                self.difficulty,
+                next_filter,
+            ),
+        )
 
 
 @bot.tree.command(name="문제", description="문제 목록을 보여줍니다.")
@@ -902,7 +968,7 @@ async def problems_command(
         await safe_send_interaction(
             interaction,
             embed=build_problem_list_embed(filtered_problems, selected_difficulty),
-            view=ProblemListView(filtered_problems),
+            view=ProblemListView(filtered_problems, selected_difficulty),
             ephemeral=False,
         )
     except requests.HTTPError as e:
