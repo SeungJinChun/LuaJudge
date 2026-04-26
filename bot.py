@@ -871,7 +871,7 @@ async def problems_command(
     난이도: discord.app_commands.Choice[str] | None = None,
 ):
     try:
-        if not await safe_defer_interaction(interaction, thinking=True):
+        if not await safe_defer_interaction(interaction, ephemeral=True, thinking=True):
             return
         selected_difficulty = None if 난이도 is None or 난이도.value == "전체문제" else 난이도.value
         problems, solved_info = await asyncio.gather(
@@ -891,7 +891,7 @@ async def problems_command(
             await safe_send_interaction(
                 interaction,
                 embed=build_embed(title, label, COLOR_DANGER),
-                ephemeral=False,
+                ephemeral=True,
             )
             return
 
@@ -899,7 +899,7 @@ async def problems_command(
             await safe_send_interaction(
                 interaction,
                 embed=build_embed("문제 목록", "아직 등록된 문제가 없습니다.", COLOR_DANGER),
-                ephemeral=False,
+                ephemeral=True,
             )
             return
 
